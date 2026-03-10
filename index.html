@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>チーム900 管理DB | DigiMan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <div class="loading-text">データを読み込んでいます...</div>
+    </div>
+
+    <!-- 外部共有モードバー -->
+    <div class="external-mode-bar" id="externalModeBar">
+        外部共有モードで表示中
+        <button onclick="exitExternalMode()" style="margin-left:12px;background:rgba(255,255,255,0.3);border:none;color:white;padding:4px 12px;border-radius:4px;cursor:pointer;">閉じる</button>
+    </div>
+
+    <!-- ヘッダー -->
+    <header class="top-header" id="topHeader">
+        <div class="logo">
+            <span class="logo-text">DigiMan</span>
+            <span style="font-size:0.85rem;color:var(--text-light);margin-left:4px;">チーム900</span>
+        </div>
+        <div class="header-right">
+            <span class="last-updated" id="lastUpdated"></span>
+            <button class="refresh-btn" onclick="refreshData()" id="refreshBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                </svg>
+                更新
+            </button>
+        </div>
+    </header>
+
+    <div class="app-container">
+        <!-- サイドバー -->
+        <aside class="sidebar" id="sidebar">
+            <nav class="sidebar-nav">
+                <button class="sidebar-item active" data-tab="overview" onclick="switchTab('overview')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                    </svg>
+                    <span class="sidebar-item-text">概要</span>
+                </button>
+                <button class="sidebar-item" data-tab="appointments" onclick="switchTab('appointments')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+                    </svg>
+                    <span class="sidebar-item-text">アポ確認</span>
+                </button>
+                <button class="sidebar-item" data-tab="yield" onclick="switchTab('yield')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                    </svg>
+                    <span class="sidebar-item-text">歩留まり</span>
+                </button>
+                <button class="sidebar-item" data-tab="projects" onclick="switchTab('projects')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/>
+                    </svg>
+                    <span class="sidebar-item-text">案件管理</span>
+                </button>
+                <button class="sidebar-item" data-tab="analysis" onclick="switchTab('analysis')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 20V10M12 20V4M6 20v-6"/>
+                    </svg>
+                    <span class="sidebar-item-text">詳細分析</span>
+                </button>
+                <button class="sidebar-item" data-tab="settings" onclick="switchTab('settings')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                    </svg>
+                    <span class="sidebar-item-text">設定</span>
+                </button>
+            </nav>
+        </aside>
+
+        <!-- メインコンテンツ -->
+        <div class="main-content">
+            <div class="dashboard">
+                <div class="page-title-row">
+                    <div class="page-title">
+                        <h1>チーム900 管理DB<span class="progress-badge" id="progressBadge">標準進捗: --%</span></h1>
+                        <p class="subtitle" id="dateInfo">読み込み中...</p>
+                    </div>
+                    <div class="filter-section" id="globalFilters">
+                        <div class="filter-group">
+                            <label class="filter-label">チーム</label>
+                            <select class="filter-select" id="filterTeam" onchange="applyFilters()">
+                                <option value="all">全体</option>
+                                <option value="野口Team">野口Team</option>
+                                <option value="松居Team">松居Team</option>
+                                <option value="坪井Team">坪井Team</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label class="filter-label">メンバー</label>
+                            <select class="filter-select" id="filterMember" onchange="applyFilters()">
+                                <option value="all">全員</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label class="filter-label">月</label>
+                            <input type="month" class="filter-date" id="filterMonth" onchange="applyFilters()">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="error-message" id="errorMessage"></div>
+
+                <!-- Tab 1: 概要 -->
+                <div class="tab-content active" id="tab-overview">
+                    <div id="salesTargetCard"></div>
+                    <div id="alertBanners"></div>
+                    <div id="requiredAppoCard"></div>
+                    <div id="kpiCards"></div>
+
+                    <div class="section-title">チーム別 進捗</div>
+                    <div id="teamCards"></div>
+
+                    <div class="section-title">メンバー別 進捗</div>
+                    <div id="memberCards"></div>
+                </div>
+
+                <!-- Tab 2: アポ確認管理 -->
+                <div class="tab-content" id="tab-appointments">
+                    <div class="section-title">アポイント確認管理</div>
+                    <div id="appo-status-summary"></div>
+                    <div class="appo-status-tabs" id="appoStatusTabs">
+                        <button class="appo-status-tab active" data-status="all" onclick="filterAppoStatus('all')">全て</button>
+                        <button class="appo-status-tab" data-status="未確認" onclick="filterAppoStatus('未確認')">
+                            未確認<span class="badge" id="unconfirmedBadge" style="display:none;">0</span>
+                        </button>
+                        <button class="appo-status-tab" data-status="実施" onclick="filterAppoStatus('実施')">実施</button>
+                        <button class="appo-status-tab" data-status="リスケ" onclick="filterAppoStatus('リスケ')">リスケ</button>
+                        <button class="appo-status-tab" data-status="キャンセル" onclick="filterAppoStatus('キャンセル')">キャンセル</button>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="appoTable">
+                            <thead>
+                                <tr>
+                                    <th>取得日</th>
+                                    <th>担当者</th>
+                                    <th>案件名</th>
+                                    <th>顧客名</th>
+                                    <th>実施予定日</th>
+                                    <th class="text-right">金額</th>
+                                    <th>ステータス</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="appoTableBody"></tbody>
+                        </table>
+                    </div>
+
+                    <div style="margin-top:32px;">
+                        <div class="section-title">確認率サマリ</div>
+                        <div class="rate-grid" id="appoRateGrid"></div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: 歩留まり分析 -->
+                <div class="tab-content" id="tab-yield">
+                    <div class="section-title">歩留まりファネル</div>
+                    <div class="funnel-container" id="funnelContainer"></div>
+
+                    <div class="section-title">歩留まりレート比較</div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="yieldTable">
+                            <thead>
+                                <tr>
+                                    <th>名前</th>
+                                    <th class="text-right">架電数</th>
+                                    <th class="text-right">PR数</th>
+                                    <th class="text-right">アポ数</th>
+                                    <th class="text-right">架電toPR率</th>
+                                    <th class="text-right">PRtoアポ率</th>
+                                    <th class="text-right">架電toアポ率</th>
+                                    <th class="text-right">単価×架toア</th>
+                                </tr>
+                            </thead>
+                            <tbody id="yieldTableBody"></tbody>
+                        </table>
+                    </div>
+
+                    <div style="margin-top:32px;">
+                        <div class="section-title">診断・改善示唆</div>
+                        <div class="diagnosis-grid" id="diagnosisGrid"></div>
+                    </div>
+
+                    <div style="margin-top:32px;">
+                        <div class="section-title">案件別 歩留まり</div>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table" id="projectYieldTable">
+                                <thead>
+                                    <tr>
+                                        <th>案件名</th>
+                                        <th class="text-right">架電数</th>
+                                        <th class="text-right">PR数</th>
+                                        <th class="text-right">アポ数</th>
+                                        <th class="text-right">架電toPR率</th>
+                                        <th class="text-right">PRtoアポ率</th>
+                                        <th class="text-right">架電toアポ率</th>
+                                        <th>アラート</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="projectYieldTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: 案件管理 -->
+                <div class="tab-content" id="tab-projects">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                        <div class="section-title" style="margin-bottom:0;border-bottom:none;padding-bottom:0;">アクティブ案件</div>
+                        <button class="btn-primary" onclick="openProjectForm()">+ 新規案件</button>
+                    </div>
+                    <div class="project-grid" id="projectGrid"></div>
+
+                    <!-- アサイン管理 -->
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:32px;margin-bottom:16px;">
+                        <div class="section-title" style="margin-bottom:0;border-bottom:none;padding-bottom:0;">
+                            案件アサイン管理 <span class="count-badge" id="assignmentCount">0件</span>
+                        </div>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn-secondary" onclick="copyAssignmentsToNextMonth()">次月コピー</button>
+                            <button class="btn-primary" onclick="openAssignmentForm()">+ 新規アサイン</button>
+                        </div>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table assignment-table" id="assignmentTable">
+                            <thead>
+                                <tr>
+                                    <th>ランク</th>
+                                    <th>案件名</th>
+                                    <th>タイプ</th>
+                                    <th>PM</th>
+                                    <th>メンバー</th>
+                                    <th class="text-right">キャップ数</th>
+                                    <th class="text-right">キャップ金額</th>
+                                    <th class="text-right">目標数</th>
+                                    <th class="text-right">架電数</th>
+                                    <th class="text-right">PR数</th>
+                                    <th class="text-right">アポ数</th>
+                                    <th class="text-right">架toPR</th>
+                                    <th class="text-right">PRtoア</th>
+                                    <th class="text-right">架toア</th>
+                                    <th class="text-right">確定金額</th>
+                                    <th class="text-right">見込み</th>
+                                    <th class="text-right">承認率</th>
+                                    <th>進捗</th>
+                                    <th>警告</th>
+                                    <th>シート</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="assignmentTableBody"></tbody>
+                        </table>
+                    </div>
+
+                    <div class="section-title" style="margin-top:32px;">月次キャップ進捗</div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="capTable">
+                            <thead>
+                                <tr>
+                                    <th>案件名</th>
+                                    <th class="text-right">キャップ数</th>
+                                    <th class="text-right">実績数</th>
+                                    <th class="text-right">消化率</th>
+                                    <th class="text-right">キャップ金額</th>
+                                    <th class="text-right">実績金額</th>
+                                    <th>進捗</th>
+                                </tr>
+                            </thead>
+                            <tbody id="capTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Tab 5: 詳細分析 -->
+                <div class="tab-content" id="tab-analysis">
+                    <div class="view-toggle">
+                        <button class="view-toggle-btn active" data-view="daily" onclick="switchAnalysisView('daily')">日次</button>
+                        <button class="view-toggle-btn" data-view="weekly" onclick="switchAnalysisView('weekly')">週次</button>
+                        <button class="view-toggle-btn" data-view="monthly" onclick="switchAnalysisView('monthly')">月次</button>
+                    </div>
+
+                    <div class="chart-section">
+                        <h3 style="font-size:0.95rem;margin-bottom:12px;">日別トレンド</h3>
+                        <div class="chart-type-selector" id="analysisChartSelector">
+                            <button class="chart-type-btn active" data-chart="calls" onclick="switchAnalysisChart('calls')">架電数</button>
+                            <button class="chart-type-btn" data-chart="pr" onclick="switchAnalysisChart('pr')">PR数</button>
+                            <button class="chart-type-btn" data-chart="appo" onclick="switchAnalysisChart('appo')">アポ数</button>
+                            <button class="chart-type-btn" data-chart="amount" onclick="switchAnalysisChart('amount')">金額</button>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="analysisChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="section-title" id="analysisTableTitle">日次実績</div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="analysisTable">
+                            <thead id="analysisTableHead"></thead>
+                            <tbody id="analysisTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Tab 6: 設定 -->
+                <div class="tab-content" id="tab-settings">
+                    <!-- 月次目標 -->
+                    <div class="settings-section">
+                        <h3>月次目標設定</h3>
+                        <div class="settings-message" id="targetMessage"></div>
+                        <div class="settings-grid" id="targetSettingsGrid"></div>
+                        <button class="save-btn" onclick="saveTargets()">保存</button>
+                    </div>
+
+                    <!-- 日次目標 -->
+                    <div class="settings-section">
+                        <h3>日次目標入力</h3>
+                        <div class="settings-message" id="dailyTargetMessage"></div>
+                        <div class="form-grid">
+                            <div class="form-field">
+                                <label>メンバー</label>
+                                <select id="dailyTargetMember"></select>
+                            </div>
+                            <div class="form-field">
+                                <label>日付</label>
+                                <input type="date" id="dailyTargetDate">
+                            </div>
+                            <div class="form-field">
+                                <label>架電数目標</label>
+                                <input type="number" id="dailyTargetCalls" min="0">
+                            </div>
+                            <div class="form-field">
+                                <label>PR数目標</label>
+                                <input type="number" id="dailyTargetPR" min="0">
+                            </div>
+                            <div class="form-field">
+                                <label>アポ数目標</label>
+                                <input type="number" id="dailyTargetAppo" min="0">
+                            </div>
+                            <div class="form-field">
+                                <label>金額目標</label>
+                                <input type="number" id="dailyTargetAmount" min="0">
+                            </div>
+                            <div class="form-field full-width">
+                                <label>メモ</label>
+                                <textarea id="dailyTargetMemo" rows="2"></textarea>
+                            </div>
+                        </div>
+                        <button class="save-btn" onclick="saveDailyTarget()">保存</button>
+                    </div>
+
+                    <!-- デフォルトレート -->
+                    <div class="settings-section">
+                        <h3>デフォルトレート設定</h3>
+                        <div class="settings-message" id="rateMessage"></div>
+                        <div class="settings-grid">
+                            <div class="settings-item">
+                                <label>キャンセル率（デフォルト）</label>
+                                <input type="number" id="settingCancelRate" step="0.01" min="0" max="1" value="0.8">
+                            </div>
+                            <div class="settings-item">
+                                <label>次月流れ率（デフォルト）</label>
+                                <input type="number" id="settingFlowRate" step="0.01" min="0" max="1" value="0.5">
+                            </div>
+                            <div class="settings-item">
+                                <label>月間目標（全体）</label>
+                                <input type="number" id="settingMonthlyTarget" min="0" value="9000000">
+                            </div>
+                        </div>
+                        <button class="save-btn" onclick="saveRateSettings()">保存</button>
+                    </div>
+
+                    <!-- メンバー管理 -->
+                    <div class="settings-section">
+                        <h3>メンバー・チーム管理</h3>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table" id="memberManageTable">
+                                <thead>
+                                    <tr>
+                                        <th>メンバー名</th>
+                                        <th>チーム</th>
+                                        <th>ステータス</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="memberManageBody"></tbody>
+                            </table>
+                        </div>
+                        <button class="btn-primary" style="margin-top:12px;" onclick="openMemberForm()">+ メンバー追加</button>
+                    </div>
+                </div>
+
+                <div class="footer">&copy; DigiMan Inc.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 案件フォームモーダル -->
+    <div class="modal-overlay hidden" id="projectFormModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="projectFormTitle">新規案件追加</h3>
+                <button class="modal-close" onclick="closeProjectForm()">&times;</button>
+            </div>
+            <form onsubmit="event.preventDefault();submitProjectForm();">
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>案件名 *</label>
+                        <input type="text" id="projFormName" required>
+                    </div>
+                    <div class="form-field">
+                        <label>顧客名</label>
+                        <input type="text" id="projFormClient">
+                    </div>
+                    <div class="form-field">
+                        <label>アポ単価</label>
+                        <input type="number" id="projFormUnitPrice" min="0">
+                    </div>
+                    <div class="form-field">
+                        <label>月次キャップ数</label>
+                        <input type="number" id="projFormCapCount" min="0">
+                    </div>
+                    <div class="form-field">
+                        <label>月次キャップ金額</label>
+                        <input type="number" id="projFormCapAmount" min="0">
+                    </div>
+                    <div class="form-field">
+                        <label>架電リストURL</label>
+                        <input type="url" id="projFormListUrl">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeProjectForm()">キャンセル</button>
+                    <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- メンバーフォームモーダル -->
+    <div class="modal-overlay hidden" id="memberFormModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>メンバー追加</h3>
+                <button class="modal-close" onclick="closeMemberForm()">&times;</button>
+            </div>
+            <form onsubmit="event.preventDefault();submitMemberForm();">
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>メンバー名 *</label>
+                        <input type="text" id="memberFormName" required>
+                    </div>
+                    <div class="form-field">
+                        <label>チーム *</label>
+                        <select id="memberFormTeam" required>
+                            <option value="野口Team">野口Team</option>
+                            <option value="松居Team">松居Team</option>
+                            <option value="坪井Team">坪井Team</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeMemberForm()">キャンセル</button>
+                    <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- アポ確認モーダル -->
+    <div class="modal-overlay hidden" id="appoDetailModal">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <h3>アポイント詳細</h3>
+                <button class="modal-close" onclick="closeAppoDetail()">&times;</button>
+            </div>
+            <div id="appoDetailContent"></div>
+        </div>
+    </div>
+
+    <!-- アサインフォームモーダル -->
+    <div class="modal-overlay hidden" id="assignmentFormModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="assignmentFormTitle">新規アサイン追加</h3>
+                <button class="modal-close" onclick="closeAssignmentForm()">&times;</button>
+            </div>
+            <form onsubmit="event.preventDefault();submitAssignmentForm();">
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>メンバー *</label>
+                        <select id="asgFormMember" required></select>
+                    </div>
+                    <div class="form-field">
+                        <label>案件 *</label>
+                        <select id="asgFormProject" required></select>
+                    </div>
+                    <div class="form-field">
+                        <label>ランク</label>
+                        <select id="asgFormRank">
+                            <option value="A">A</option>
+                            <option value="B">B</option>
+                            <option value="C" selected>C</option>
+                            <option value="D">D</option>
+                            <option value="立ち上げ">立ち上げ</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>案件タイプ</label>
+                        <select id="asgFormType">
+                            <option value="成果報酬">成果報酬</option>
+                            <option value="稼働報酬">稼働報酬</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>PM名</label>
+                        <input type="text" id="asgFormPM">
+                    </div>
+                    <div class="form-field">
+                        <label>キャップ数</label>
+                        <input type="number" id="asgFormCapCount" min="0">
+                    </div>
+                    <div class="form-field">
+                        <label>キャップ金額</label>
+                        <input type="number" id="asgFormCapAmount" min="0">
+                    </div>
+                    <div class="form-field">
+                        <label>却下込取得目標数</label>
+                        <input type="number" id="asgFormTargetCount" min="0">
+                    </div>
+                    <div class="form-field full-width">
+                        <label>案件管理シートURL</label>
+                        <input type="url" id="asgFormSheetUrl">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeAssignmentForm()">キャンセル</button>
+                    <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
