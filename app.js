@@ -187,7 +187,7 @@ function renderAll() {
     const filteredExecAppo = filterAppointments(executionAppoData, filter);
 
     renderOverview(filteredPerf, filteredAppo, filteredExecAppo, filter);
-    renderAppointments(filteredAppo);
+    renderAppointments(filteredExecAppo);
     renderYield(filteredPerf, filter);
     renderProjects();
     renderAnalysis(filteredPerf, filter);
@@ -675,16 +675,18 @@ async function updateAppoStatus(id, newStatus) {
             [newStatus, newStatus !== '未確認' ? now : null, id]
         );
 
-        // ローカルデータ更新
-        const appo = appointmentsData.find(a => a.id === id);
-        if (appo) {
-            appo.status = newStatus;
-            appo.confirmation_date = newStatus !== '未確認' ? now : null;
-        }
+        // ローカルデータ更新（両方のリストを更新）
+        [appointmentsData, executionAppoData].forEach(list => {
+            const appo = list.find(a => a.id === id);
+            if (appo) {
+                appo.status = newStatus;
+                appo.confirmation_date = newStatus !== '未確認' ? now : null;
+            }
+        });
 
         const filter = getFilters();
-        renderAppointments(filterAppointments(appointmentsData, filter));
-        renderOverview(filterPerformance(performanceData, filter), filterAppointments(appointmentsData, filter), filter);
+        renderAppointments(filterAppointments(executionAppoData, filter));
+        renderOverview(filterPerformance(performanceData, filter), filterAppointments(appointmentsData, filter), filterAppointments(executionAppoData, filter), filter);
     } catch (error) {
         console.error('Status update error:', error);
         alert('ステータス更新に失敗しました: ' + error.message);

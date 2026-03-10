@@ -78,6 +78,12 @@ function syncSlackAppoStatusToTurso() {
     // confirmation_dateも設定してGAS同期での上書きを防止
     const now = new Date().toISOString().replace('T', ' ').split('.')[0];
 
+    // 株式会社を除いた短縮名を作成（部分一致用）
+    const shortName = parsed.customerName
+      .replace(/株式会社/g, '')
+      .replace(/　/g, '')
+      .trim();
+
     if (parsed.action === 'approved') {
       requests.push({
         type: 'execute',
@@ -88,7 +94,7 @@ function syncSlackAppoStatusToTurso() {
                     confirmed_by = 'TAAN/Slack',
                     memo = CASE WHEN memo IS NULL OR memo = '' THEN ? ELSE memo || ' / ' || ? END,
                     updated_at = datetime('now')
-                WHERE customer_name = ?
+                WHERE (customer_name = ? OR customer_name LIKE '%' || ? || '%')
                   AND scheduled_date = ?
                   AND status != '実施'`,
           args: [
@@ -96,6 +102,7 @@ function syncSlackAppoStatusToTurso() {
             toTursoArg('承認: ' + (parsed.service || '')),
             toTursoArg('承認: ' + (parsed.service || '')),
             toTursoArg(parsed.customerName),
+            toTursoArg(shortName),
             toTursoArg(parsed.scheduledDate)
           ]
         }
@@ -110,7 +117,7 @@ function syncSlackAppoStatusToTurso() {
                     confirmed_by = 'TAAN/Slack',
                     memo = CASE WHEN memo IS NULL OR memo = '' THEN ? ELSE memo || ' / ' || ? END,
                     updated_at = datetime('now')
-                WHERE customer_name = ?
+                WHERE (customer_name = ? OR customer_name LIKE '%' || ? || '%')
                   AND scheduled_date = ?
                   AND status != 'キャンセル'`,
           args: [
@@ -118,6 +125,7 @@ function syncSlackAppoStatusToTurso() {
             toTursoArg('却下: ' + (parsed.service || '')),
             toTursoArg('却下: ' + (parsed.service || '')),
             toTursoArg(parsed.customerName),
+            toTursoArg(shortName),
             toTursoArg(parsed.scheduledDate)
           ]
         }
@@ -133,7 +141,7 @@ function syncSlackAppoStatusToTurso() {
                     reschedule_date = ?,
                     memo = CASE WHEN memo IS NULL OR memo = '' THEN ? ELSE memo || ' / ' || ? END,
                     updated_at = datetime('now')
-                WHERE customer_name = ?
+                WHERE (customer_name = ? OR customer_name LIKE '%' || ? || '%')
                   AND scheduled_date = ?
                   AND status NOT IN ('リスケ', 'キャンセル')`,
           args: [
@@ -142,6 +150,7 @@ function syncSlackAppoStatusToTurso() {
             toTursoArg('リスケ: ' + (parsed.service || '')),
             toTursoArg('リスケ: ' + (parsed.service || '')),
             toTursoArg(parsed.customerName),
+            toTursoArg(shortName),
             toTursoArg(parsed.scheduledDate)
           ]
         }
