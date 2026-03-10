@@ -772,6 +772,12 @@ body {
     border-left: 4px solid var(--success);
 }
 
+.diagnosis-card.priority {
+    border-left: 4px solid var(--primary-red);
+    background: #fff3f3;
+    box-shadow: 0 0 0 1px var(--primary-red);
+}
+
 .diagnosis-title {
     font-weight: 600;
     margin-bottom: 8px;

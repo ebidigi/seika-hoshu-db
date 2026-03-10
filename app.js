@@ -35,6 +35,10 @@ document.addEventListener('DOMContentLoaded', () => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     document.getElementById('dailyTargetDate').value = formatDate(tomorrow);
 
+    // 概要タブがデフォルトなのでフィルターを非表示
+    const filters = document.getElementById('globalFilters');
+    if (filters) filters.style.display = 'none';
+
     // URL パラメータで外部共有モード
     const params = new URLSearchParams(window.location.search);
     if (params.get('view') === 'external') {
@@ -187,7 +191,11 @@ function renderAll() {
     const filteredAppo = filterAppointments(appointmentsData, filter);
     const filteredExecAppo = filterAppointments(executionAppoData, filter);
 
-    renderOverview(filteredPerf, filteredAppo, filteredExecAppo, filter);
+    // 概要は常にフィルタなし（全体表示）
+    const noFilter = { team: 'all', member: 'all', month: filter.month };
+    renderOverview(performanceData, appointmentsData, executionAppoData, noFilter);
+
+    // 他のタブはフィルター適用
     renderAppointments();
     renderYield(filteredPerf, filter);
     renderProjects();
@@ -830,62 +838,94 @@ function renderDiagnosis(perfData, totalCalls, totalPR, totalAppo) {
 
     const totalHours = sum(perfData, 'call_hours');
     const callsPerHour = totalHours > 0 ? totalCalls / totalHours : 0;
-    const callToPR = totalCalls > 0 ? totalPR / totalCalls : 0;
-    const prToAppo = totalPR > 0 ? totalAppo / totalPR : 0;
 
-    // 時間あたり架電数チェック（40件/h以下は低水準）
-    if (totalHours > 0 && callsPerHour < 40) {
-        diagCards.push({
-            alert: true,
-            title: 'オペレーション課題',
-            text: `時間あたり架電数が${callsPerHour.toFixed(1)}件/hと低水準です。架電オペレーションの効率化やリスト準備の改善を検討してください。`
+    // Data or Die ベースライン指標
+    const BASELINE = {
+        callToPR: 0.15,    // A: 架電to着電率 15%
+        prToAppo: 0.30,    // B: 着電toアポ率 30%
+        callToAppo: 0.03,  // C: 架電toアポ率 3% (A×B≒4.5%だが実績ベース3%)
+        callsPerHour: 40   // オペレーション基準 40件/h
+    };
+
+    const actualCallToPR = totalCalls > 0 ? totalPR / totalCalls : 0;
+    const actualPrToAppo = totalPR > 0 ? totalAppo / totalPR : 0;
+    const actualCallToAppo = totalCalls > 0 ? totalAppo / totalCalls : 0;
+
+    // 比率ベースの乖離度（actual/baseline - 1）: マイナスが大きいほど改善余地大
+    const gaps = [];
+    if (totalCalls > 0) {
+        gaps.push({
+            key: 'callToPR',
+            label: '架電to着電率（リスト品質）',
+            actual: actualCallToPR,
+            baseline: BASELINE.callToPR,
+            ratio: actualCallToPR / BASELINE.callToPR - 1,
+            suggestion: 'リストの精度向上、業種・時間帯の見直し、受付突破トークの改善を検討してください。'
         });
-    } else if (totalHours > 0) {
+    }
+    if (totalPR > 0) {
+        gaps.push({
+            key: 'prToAppo',
+            label: '着電toアポ率（トーク品質）',
+            actual: actualPrToAppo,
+            baseline: BASELINE.prToAppo,
+            ratio: actualPrToAppo / BASELINE.prToAppo - 1,
+            suggestion: 'トークスクリプトの改善、ロープレ、ヒアリング精度の向上を検討してください。'
+        });
+    }
+    if (totalCalls > 0) {
+        gaps.push({
+            key: 'callToAppo',
+            label: '架電toアポ率（総合効率）',
+            actual: actualCallToAppo,
+            baseline: BASELINE.callToAppo,
+            ratio: actualCallToAppo / BASELINE.callToAppo - 1,
+            suggestion: 'リスト品質とトーク品質の両面から改善を検討してください。'
+        });
+    }
+
+    // オペレーション診断
+    if (totalHours > 0) {
+        const opsRatio = callsPerHour / BASELINE.callsPerHour - 1;
         diagCards.push({
-            alert: false,
+            alert: opsRatio < -0.1,
             title: 'オペレーション',
-            text: `時間あたり架電数 ${callsPerHour.toFixed(1)}件/h - 良好な水準です。`
+            text: `時間あたり架電数 ${callsPerHour.toFixed(1)}件/h（基準: ${BASELINE.callsPerHour}件/h、乖離: ${opsRatio >= 0 ? '+' : ''}${(opsRatio * 100).toFixed(0)}%）` +
+                (opsRatio < -0.1 ? '。架電オペレーションの効率化やリスト準備の改善を検討してください。' : '。良好な水準です。')
         });
     } else {
-        diagCards.push({
-            alert: false,
-            title: 'オペレーション',
-            text: `稼働時間データなし`
-        });
+        diagCards.push({ alert: false, title: 'オペレーション', text: '稼働時間データなし' });
     }
 
-    // 架電toPR率チェック（10%以下はリスト品質問題）
-    if (callToPR < 0.10 && totalCalls > 0) {
-        diagCards.push({
-            alert: true,
-            title: 'リスト品質課題',
-            text: `架電toPR率が${(callToPR * 100).toFixed(1)}%と低水準です。リストの精度向上や業種・時間帯の見直しを検討してください。`
-        });
-    } else if (totalCalls > 0) {
-        diagCards.push({
-            alert: false,
-            title: 'リスト品質',
-            text: `架電toPR率 ${(callToPR * 100).toFixed(1)}% - 問題ありません。`
-        });
-    }
+    // 乖離度の大きい順にソート（最も改善余地の大きい指標を特定）
+    gaps.sort((a, b) => a.ratio - b.ratio);
 
-    // PRtoアポ率チェック（5%以下はトーク品質問題）
-    if (prToAppo < 0.05 && totalPR > 0) {
+    // 各指標の診断カード
+    gaps.forEach((g, i) => {
+        const pct = (g.actual * 100).toFixed(1);
+        const basePct = (g.baseline * 100).toFixed(1);
+        const gapPct = (g.ratio * 100).toFixed(0);
+        const isWorst = i === 0 && g.ratio < -0.1;
+
+        let text = `実績 ${pct}%（基準: ${basePct}%、乖離: ${g.ratio >= 0 ? '+' : ''}${gapPct}%）`;
+        if (isWorst) {
+            text += `。最も改善インパクトが大きい指標です。${g.suggestion}`;
+        } else if (g.ratio < -0.1) {
+            text += `。${g.suggestion}`;
+        } else {
+            text += '。基準値を満たしています。';
+        }
+
         diagCards.push({
-            alert: true,
-            title: 'トーク品質課題',
-            text: `PRtoアポ率が${(prToAppo * 100).toFixed(1)}%と低水準です。トークスクリプトの改善やロープレを検討してください。`
+            alert: g.ratio < -0.1,
+            priority: isWorst,
+            title: g.label + (isWorst ? ' [最優先]' : ''),
+            text
         });
-    } else if (totalPR > 0) {
-        diagCards.push({
-            alert: false,
-            title: 'トーク品質',
-            text: `PRtoアポ率 ${(prToAppo * 100).toFixed(1)}% - 問題ありません。`
-        });
-    }
+    });
 
     document.getElementById('diagnosisGrid').innerHTML = diagCards.map(d => `
-        <div class="diagnosis-card ${d.alert ? 'alert' : 'ok'}">
+        <div class="diagnosis-card ${d.alert ? 'alert' : 'ok'}${d.priority ? ' priority' : ''}">
             <div class="diagnosis-title">${d.title}</div>
             <div class="diagnosis-text">${d.text}</div>
         </div>
@@ -1738,6 +1778,21 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.toggle('active', content.id === `tab-${tab}`);
     });
+
+    // 概要タブではフィルターを非表示、他タブでは表示
+    const filters = document.getElementById('globalFilters');
+    if (filters) {
+        filters.style.display = tab === 'overview' ? 'none' : 'flex';
+    }
+
+    // タブ切替時にチーム・メンバーフィルターをリセット（タブ間の影響を防止）
+    document.getElementById('filterTeam').value = 'all';
+    document.getElementById('filterMember').value = 'all';
+    populateMemberFilter();
+
+    // 現タブのデータを再描画
+    renderAll();
+
     localStorage.setItem('seikaActiveTab', tab);
 }
 
