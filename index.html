@@ -135,14 +135,17 @@
                 <div class="tab-content" id="tab-appointments">
                     <div class="section-title">アポイント確認管理 <span style="font-size:0.75rem;color:var(--text-light);font-weight:normal;margin-left:8px;">※ 当月実施予定のアポを表示</span></div>
                     <div id="appo-status-summary"></div>
-                    <div class="appo-status-tabs" id="appoStatusTabs">
-                        <button class="appo-status-tab active" data-status="all" onclick="filterAppoStatus('all')">全て</button>
-                        <button class="appo-status-tab" data-status="未確認" onclick="filterAppoStatus('未確認')">
-                            未確認<span class="badge" id="unconfirmedBadge" style="display:none;">0</span>
-                        </button>
-                        <button class="appo-status-tab" data-status="実施" onclick="filterAppoStatus('実施')">実施</button>
-                        <button class="appo-status-tab" data-status="リスケ" onclick="filterAppoStatus('リスケ')">リスケ</button>
-                        <button class="appo-status-tab" data-status="キャンセル" onclick="filterAppoStatus('キャンセル')">キャンセル</button>
+                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                        <div class="appo-status-tabs" id="appoStatusTabs">
+                            <button class="appo-status-tab active" data-status="all" onclick="filterAppoStatus('all')">全て</button>
+                            <button class="appo-status-tab" data-status="未確認" onclick="filterAppoStatus('未確認')">
+                                未確認<span class="badge" id="unconfirmedBadge" style="display:none;">0</span>
+                            </button>
+                            <button class="appo-status-tab" data-status="実施" onclick="filterAppoStatus('実施')">実施</button>
+                            <button class="appo-status-tab" data-status="リスケ" onclick="filterAppoStatus('リスケ')">リスケ</button>
+                            <button class="appo-status-tab" data-status="キャンセル" onclick="filterAppoStatus('キャンセル')">キャンセル</button>
+                        </div>
+                        <button id="appoShowAllBtn" class="btn-secondary" onclick="toggleAppoRange()" style="font-size:0.8rem;padding:6px 14px;">全一覧を表示</button>
                     </div>
                     <div style="overflow-x:auto;">
                         <table class="data-table" id="appoTable">

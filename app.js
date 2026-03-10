@@ -21,6 +21,7 @@ let currentAnalysisChart = 'calls';
 let assignmentsData = [];
 let editingAssignmentId = null;
 let executionAppoData = []; // 当月実施予定のアポ（前月以前取得含む）
+let appoShowAll = false; // false=今日まで, true=全一覧
 
 // ==================== 初期化 ====================
 document.addEventListener('DOMContentLoaded', () => {
@@ -187,7 +188,7 @@ function renderAll() {
     const filteredExecAppo = filterAppointments(executionAppoData, filter);
 
     renderOverview(filteredPerf, filteredAppo, filteredExecAppo, filter);
-    renderAppointments(filteredExecAppo);
+    renderAppointments();
     renderYield(filteredPerf, filter);
     renderProjects();
     renderAnalysis(filteredPerf, filter);
@@ -557,11 +558,14 @@ function renderMemberCards(perfData, appoData, standardProgress) {
 }
 
 // ==================== Tab 2: アポ確認管理 ====================
-function renderAppointments(appoData) {
-    // ステータス別サマリ
+function renderAppointments() {
+    const filter = getFilters();
+    const allData = filterAppointments(executionAppoData, filter);
+
+    // サマリーは常に当月全体で計算
     const statusCounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
     const statusAmounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
-    appoData.forEach(a => {
+    allData.forEach(a => {
         if (statusCounts[a.status] !== undefined) {
             statusCounts[a.status]++;
             statusAmounts[a.status] += a.amount || 0;
@@ -581,7 +585,7 @@ function renderAppointments(appoData) {
     document.getElementById('appo-status-summary').innerHTML = `
         <div class="rate-grid" style="margin-bottom:20px;">
             <div class="rate-card">
-                <div class="rate-value" style="color:var(--text-dark);">${appoData.length}</div>
+                <div class="rate-value" style="color:var(--text-dark);">${allData.length}</div>
                 <div class="rate-label">総アポ数</div>
             </div>
             <div class="rate-card">
@@ -599,8 +603,13 @@ function renderAppointments(appoData) {
         </div>
     `;
 
-    // テーブル
-    const filtered = currentAppoFilter === 'all' ? appoData : appoData.filter(a => a.status === currentAppoFilter);
+    // テーブル用データ: 今日までフィルタ + ステータスフィルタ
+    let tableData = allData;
+    if (!appoShowAll) {
+        const today = new Date().toISOString().split('T')[0];
+        tableData = tableData.filter(a => a.scheduled_date <= today);
+    }
+    const filtered = currentAppoFilter === 'all' ? tableData : tableData.filter(a => a.status === currentAppoFilter);
 
     const tbody = document.getElementById('appoTableBody');
     tbody.innerHTML = filtered.map(a => {
@@ -632,7 +641,7 @@ function renderAppointments(appoData) {
     }).join('');
 
     // 確認率サマリ
-    const total = appoData.length;
+    const total = allData.length;
     const cancelRate = total > 0 ? (statusCounts['キャンセル'] / total * 100).toFixed(1) : '0';
     const rescheduleRate = total > 0 ? (statusCounts['リスケ'] / total * 100).toFixed(1) : '0';
     const executeRate = total > 0 ? (statusCounts['実施'] / total * 100).toFixed(1) : '0';
@@ -664,16 +673,34 @@ function filterAppoStatus(status) {
         tab.classList.toggle('active', tab.dataset.status === status);
     });
     const filter = getFilters();
-    renderAppointments(filterAppointments(appointmentsData, filter));
+    renderAppointments();
 }
 
+function toggleAppoRange() {
+    appoShowAll = !appoShowAll;
+    const btn = document.getElementById('appoShowAllBtn');
+    btn.textContent = appoShowAll ? '今日までを表示' : '全一覧を表示';
+    const filter = getFilters();
+    renderAppointments();
+}
+
+
 async function updateAppoStatus(id, newStatus) {
+    console.log('updateAppoStatus called:', id, newStatus);
     try {
         const now = new Date().toISOString().split('T')[0];
-        await executeTurso(
-            "UPDATE appointments SET status = ?, confirmation_date = ?, updated_at = datetime('now') WHERE id = ?",
-            [newStatus, newStatus !== '未確認' ? now : null, id]
-        );
+        if (newStatus === '未確認') {
+            await executeTurso(
+                "UPDATE appointments SET status = ?, confirmation_date = NULL, confirmed_by = NULL, updated_at = datetime('now') WHERE id = ?",
+                [newStatus, id]
+            );
+        } else {
+            await executeTurso(
+                "UPDATE appointments SET status = ?, confirmation_date = ?, confirmed_by = 'dashboard', updated_at = datetime('now') WHERE id = ?",
+                [newStatus, now, id]
+            );
+        }
+        console.log('DB update done');
 
         // ローカルデータ更新（両方のリストを更新）
         [appointmentsData, executionAppoData].forEach(list => {
@@ -683,12 +710,13 @@ async function updateAppoStatus(id, newStatus) {
                 appo.confirmation_date = newStatus !== '未確認' ? now : null;
             }
         });
+        console.log('Local data updated');
 
         const filter = getFilters();
-        renderAppointments(filterAppointments(executionAppoData, filter));
-        renderOverview(filterPerformance(performanceData, filter), filterAppointments(appointmentsData, filter), filterAppointments(executionAppoData, filter), filter);
+        renderAppointments();
+        console.log('renderAppointments done');
     } catch (error) {
-        console.error('Status update error:', error);
+        console.error('Status update error:', error, error.stack);
         alert('ステータス更新に失敗しました: ' + error.message);
     }
 }
