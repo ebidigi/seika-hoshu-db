@@ -165,6 +165,30 @@ CREATE TABLE IF NOT EXISTS project_member_assignments (
 CREATE INDEX IF NOT EXISTS idx_pma_year_month ON project_member_assignments(year_month);
 CREATE INDEX IF NOT EXISTS idx_pma_member ON project_member_assignments(member_name);
 
+-- メンバー月次コスト（給与）
+CREATE TABLE IF NOT EXISTS member_monthly_costs (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6)))),
+  member_name TEXT NOT NULL,
+  year_month TEXT NOT NULL,
+  salary INTEGER DEFAULT 0,
+  memo TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(member_name, year_month)
+);
+
+-- チーム月次損益サマリ
+CREATE TABLE IF NOT EXISTS team_monthly_pl (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6)))),
+  year_month TEXT NOT NULL UNIQUE,
+  revenue INTEGER DEFAULT 0,
+  cost_total INTEGER DEFAULT 0,
+  gross_profit INTEGER DEFAULT 0,
+  memo TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- 初期データ: デフォルト設定
 INSERT OR IGNORE INTO settings (key, value) VALUES ('cancel_rate_default', '0.8');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('next_month_flow_rate', '0.5');
