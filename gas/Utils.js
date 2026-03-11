@@ -17,8 +17,65 @@ const SEIKA_MEMBERS = [
   '野口', '中村 峻也', '田中克樹', '辻森',
   '松居', '山本', '美除',
   '坪井', '村松', '田中颯汰',
-  '宮城'
+  '宮城 啓生'
 ];
+
+// スプレッドシート名 → DB正規名マッピング
+const MEMBER_NAME_MAP = {
+  'tanaka sota': '田中颯汰',
+  '中村 峻也': '中村た',
+  '中村峻也': '中村た',
+  '田中克樹': '田中か',
+  '田中颯汰': '田中颯汰',
+  '宮城 啓生': '宮城',
+  '宮城啓生': '宮城',
+  '宮城一平': '宮城',
+  '野口純': '野口',
+  '野口 純': '野口',
+  '坪井 秀斗': '坪井',
+  '坪井秀斗': '坪井',
+  '松居和輝': '松居',
+  '松居 和輝': '松居',
+  '村松和哉': '村松',
+  '村松 和哉': '村松',
+  '辻森誠也': '辻森',
+  '辻森 誠也': '辻森',
+  '山本匠太郎': '山本',
+  '山本 匠太郎': '山本',
+  '美除直生': '美除',
+  '美除 直生': '美除'
+};
+
+/**
+ * スプレッドシートの担当者名をDB正規名に変換
+ */
+function normalizeMemberName(rawName) {
+  if (!rawName) return '';
+  let name = String(rawName).trim();
+
+  // Slack形式 "@名前/id" から名前部分を抽出
+  const slackMatch = name.match(/^@(.+?)\//);
+  if (slackMatch) {
+    name = slackMatch[1].trim();
+  } else if (name.startsWith('@')) {
+    // "@名前" 形式（/なし）
+    name = name.substring(1).trim();
+  }
+
+  // 完全一致
+  if (MEMBER_NAME_MAP[name]) return MEMBER_NAME_MAP[name];
+
+  // スペースなし版で再チェック
+  const noSpace = name.replace(/\s+/g, '');
+  if (MEMBER_NAME_MAP[noSpace]) return MEMBER_NAME_MAP[noSpace];
+
+  // 部分一致（長いキーから先に評価して誤マッチ防止）
+  var entries = Object.entries(MEMBER_NAME_MAP).sort(function(a, b) { return b[0].length - a[0].length; });
+  for (const [key, val] of entries) {
+    if (name.includes(key) || noSpace.includes(key.replace(/\s+/g, ''))) return val;
+  }
+  return name;
+}
 
 // ==================== Turso API ====================
 
@@ -41,13 +98,13 @@ function executeTursoPipeline(requests) {
 
   const httpUrl = config.url.replace('libsql://', 'https://') + '/v3/pipeline';
 
-  requests.push({ type: 'close' });
+  const pipeline = requests.concat([{ type: 'close' }]);
 
   const options = {
     method: 'POST',
     contentType: 'application/json',
     headers: { 'Authorization': 'Bearer ' + config.token },
-    payload: JSON.stringify({ requests: requests }),
+    payload: JSON.stringify({ requests: pipeline }),
     muteHttpExceptions: true
   };
 
@@ -137,10 +194,15 @@ function isBusinessHoursSeika() {
 
 /**
  * 成果報酬チームメンバーかどうか判定
+ * 正規化後の名前でもマッチするよう、normalizeMemberName() を通してから判定
  */
 function isSeikaTeamMember(name) {
   if (!name) return false;
-  const normalized = String(name).trim();
+  const raw = String(name).trim();
+  // 元名でマッチ
+  if (SEIKA_MEMBERS.some(m => raw.includes(m))) return true;
+  // 正規化名でマッチ
+  const normalized = normalizeMemberName(raw);
   return SEIKA_MEMBERS.some(m => normalized.includes(m));
 }
 
@@ -160,11 +222,16 @@ function sendSlackNotificationSeika(message, channel) {
     mrkdwn: true
   };
 
-  UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', {
+  var resp = UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
     contentType: 'application/json',
     headers: { 'Authorization': 'Bearer ' + token },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   });
+
+  var body = JSON.parse(resp.getContentText());
+  if (!body.ok) {
+    Logger.log('Slack API error: ' + (body.error || 'unknown'));
+  }
 }
