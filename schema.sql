@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('野口Team', '野口');
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('松居Team', '松居');
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('坪井Team', '坪井');
+INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('宮城Team', '宮城');
 
 -- 初期データ: メンバー
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('野口', '野口Team');
@@ -143,7 +144,8 @@ INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('山本', '松居
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('美除', '松居Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('坪井', '坪井Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('村松', '坪井Team');
-INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中颯', '坪井Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中颯汰', '坪井Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('宮城', '宮城Team');
 
 -- 案件×メンバー アサイン管理（月次）
 CREATE TABLE IF NOT EXISTS project_member_assignments (

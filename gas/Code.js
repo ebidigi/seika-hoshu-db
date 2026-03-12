@@ -22,7 +22,6 @@ function doGet(e) {
       case 'sync':
         syncPerformanceToTursoSeika();
         syncSalesReportToTursoSeika();
-        syncSlackAppoStatusToTurso();
         result = { status: 'ok', message: 'Sync completed' };
         break;
 
@@ -56,7 +55,6 @@ function setupTriggersSeika() {
     const name = trigger.getHandlerFunction();
     if (name === 'syncPerformanceToTursoSeika' ||
         name === 'syncSalesReportToTursoSeika' ||
-        name === 'syncSlackAppoStatusToTurso' ||
         name === 'sendSeikaSlackNotification12' ||
         name === 'sendSeikaSlackNotification15' ||
         name === 'sendSeikaSlackNotification18' ||
@@ -73,12 +71,6 @@ function setupTriggersSeika() {
 
   // 売上報告同期: 15分毎
   ScriptApp.newTrigger('syncSalesReportToTursoSeika')
-    .timeBased()
-    .everyMinutes(15)
-    .create();
-
-  // Slackアポステータス同期: 15分毎
-  ScriptApp.newTrigger('syncSlackAppoStatusToTurso')
     .timeBased()
     .everyMinutes(15)
     .create();

@@ -90,7 +90,8 @@ function sendSeikaSlackNotification() {
     const teams = {
       '野口Team': ['野口', '中村た', '田中か', '辻森'],
       '松居Team': ['松居', '山本', '美除'],
-      '坪井Team': ['坪井', '村松', '田中颯']
+      '坪井Team': ['坪井', '村松', '田中颯汰'],
+      '宮城Team': ['宮城']
     };
 
     let teamLines = '';
@@ -98,11 +99,10 @@ function sendSeikaSlackNotification() {
       var teamMembers = teams[teamName];
       var teamAmount = 0;
       perfData.forEach(function(d) {
-        if (teamMembers.some(function(m) { return d.member_name && d.member_name.includes(m); })) {
+        if (d.member_name && teamMembers.indexOf(d.member_name) !== -1) {
           teamAmount += parseInt(d.amount) || 0;
         }
       });
-      var teamRate = monthlyTarget > 0 ? (teamAmount / monthlyTarget * 100 * 3).toFixed(1) : '0'; // チーム目標は全体の1/3想定
       teamLines += teamName + ': ¥' + teamAmount.toLocaleString() + '\n';
     }
 
