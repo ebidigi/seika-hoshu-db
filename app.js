@@ -89,6 +89,54 @@ async function executeTurso(sql, args = []) {
     return queryTurso(sql, args);
 }
 
+// ==================== メンバー名正規化（フロントエンド防御） ====================
+const MEMBER_NAME_NORMALIZE = {
+    '野口純': '野口', '野口 純': '野口', '@野口純/noguchi jun': '野口',
+    '坪井 秀斗': '坪井', '坪井秀斗': '坪井', '@坪井 秀斗/tsuboi shuto': '坪井',
+    '松居和輝': '松居', '松居 和輝': '松居', '@松居和輝/matsui kazuki': '松居',
+    '村松和哉': '村松', '村松 和哉': '村松', '@村松和哉/Kazuya Muramatsu': '村松',
+    '辻森誠也': '辻森', '辻森 誠也': '辻森', '@辻森誠也/Tsujimori Seiya': '辻森',
+    '山本匠太郎': '山本', '山本 匠太郎': '山本', '@山本 匠太郎': '山本',
+    '美除直生': '美除', '美除 直生': '美除', '@美除直生': '美除',
+    '中村 峻也': '中村た', '中村峻也': '中村た', '@中村 峻也/nakamura takaya': '中村た',
+    '田中克樹': '田中か', '@田中克樹/katsuki tanaka': '田中か',
+    '宮城 啓生': '宮城', '宮城啓生': '宮城', '@宮城 啓生/miyagi hiroki': '宮城', '宮城一平': '宮城', '@宮城一平': '宮城',
+    '@田中颯汰/tanaka sota': '田中颯汰'
+};
+
+function normalizeMemberName(name) {
+    if (!name) return name;
+    if (MEMBER_NAME_NORMALIZE[name]) return MEMBER_NAME_NORMALIZE[name];
+    // @名前/id 形式のフォールバック
+    const m = name.match(/^@(.+?)\//);
+    if (m) {
+        const extracted = m[1].trim();
+        if (MEMBER_NAME_NORMALIZE[extracted]) return MEMBER_NAME_NORMALIZE[extracted];
+    } else if (name.startsWith('@')) {
+        const stripped = name.substring(1).trim();
+        if (MEMBER_NAME_NORMALIZE[stripped]) return MEMBER_NAME_NORMALIZE[stripped];
+    }
+    return name;
+}
+
+function normalizeDataMemberNames(dataArray) {
+    dataArray.forEach(d => {
+        if (d.member_name) d.member_name = normalizeMemberName(d.member_name);
+    });
+}
+
+function deduplicateAppointments(appoArray) {
+    const seen = new Map();
+    for (const a of appoArray) {
+        const key = `${a.member_name}|${a.project_name}|${a.acquisition_date}|${a.customer_name}`;
+        // confirmation_date がある方を優先
+        if (!seen.has(key) || (a.confirmation_date && !seen.get(key).confirmation_date)) {
+            seen.set(key, a);
+        }
+    }
+    return Array.from(seen.values());
+}
+
 // ==================== データ読み込み ====================
 async function loadAllData() {
     showLoading();
@@ -161,6 +209,16 @@ async function loadMonthData() {
     targetsData = results[2];
     assignmentsData = results[3] || [];
     executionAppoData = results[4] || [];
+
+    // メンバー名正規化（DB側に非正規名が入っていても正しく集計）
+    normalizeDataMemberNames(performanceData);
+    normalizeDataMemberNames(appointmentsData);
+    normalizeDataMemberNames(executionAppoData);
+    normalizeDataMemberNames(assignmentsData);
+
+    // 同一人物の重複アポを除去（member_name + project_name + acquisition_date + customer_name）
+    appointmentsData = deduplicateAppointments(appointmentsData);
+    executionAppoData = deduplicateAppointments(executionAppoData);
 
     // appointment_amountが0の場合、案件マスタの単価×アポ数で補完
     const projectPriceMap = {};
@@ -272,6 +330,171 @@ function populateDailyTargetMember() {
     });
 }
 
+// ==================== 本日サマリー ====================
+let todaySummaryOpen = true;
+
+function toggleTodaySummary() {
+    todaySummaryOpen = !todaySummaryOpen;
+    const body = document.getElementById('todaySummaryBody');
+    const icon = document.getElementById('todaySummaryToggleIcon');
+    if (body) body.style.display = todaySummaryOpen ? 'block' : 'none';
+    if (icon) icon.style.transform = todaySummaryOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
+}
+
+function renderTodaySummary(appoData) {
+    const today = formatDate(new Date());
+    const todayAppo = appoData.filter(a => a.acquisition_date === today);
+
+    // 全体合計（データ有無問わず表示）
+    const grandTotal = todayAppo.reduce((s, a) => s + (a.amount || 0), 0);
+
+    if (todayAppo.length === 0) {
+        document.getElementById('todaySummary').innerHTML = `
+            <div class="today-summary-card">
+                <div class="today-summary-header" onclick="toggleTodaySummary()" style="cursor:pointer;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <svg id="todaySummaryToggleIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="transition:transform 0.2s;${todaySummaryOpen ? '' : 'transform:rotate(-90deg);'}"><path d="M6 9l6 6 6-6"/></svg>
+                        <span>本日の実績</span>
+                    </div>
+                    <span class="today-summary-total">¥0</span>
+                </div>
+                <div id="todaySummaryBody" style="${todaySummaryOpen ? '' : 'display:none;'}">
+                    <div style="color:var(--text-light);font-size:0.85rem;padding:12px 0;">本日のアポ取得データはまだありません</div>
+                </div>
+            </div>`;
+        return;
+    }
+
+    // 案件名リスト＆色割り当て
+    const projectNames = [...new Set(todayAppo.map(a => a.project_name).filter(Boolean))];
+    const projectColors = [
+        '#86aaec', '#ef947a', '#ede07d', '#7ecba1', '#c4a0e8',
+        '#f5a8c4', '#8dd4cf', '#f0c078', '#a0b8d8', '#d4a5a5'
+    ];
+    const colorMap = {};
+    projectNames.forEach((p, i) => { colorMap[p] = projectColors[i % projectColors.length]; });
+
+    // メンバー別集計（案件別内訳: 金額＋件数）
+    const memberMap = {};
+    todayAppo.forEach(a => {
+        const name = a.member_name || '不明';
+        if (!memberMap[name]) memberMap[name] = { total: 0, count: 0, projects: {} };
+        memberMap[name].total += (a.amount || 0);
+        memberMap[name].count++;
+        const pn = a.project_name || '不明';
+        if (!memberMap[name].projects[pn]) memberMap[name].projects[pn] = { amount: 0, count: 0 };
+        memberMap[name].projects[pn].amount += (a.amount || 0);
+        memberMap[name].projects[pn].count++;
+    });
+
+    // ランキング順（金額降順）
+    const memberRanking = Object.entries(memberMap)
+        .sort((a, b) => b[1].total - a[1].total);
+    const maxMemberAmount = memberRanking.length > 0 ? memberRanking[0][1].total : 1;
+
+    // チーム別集計
+    const teamMap = {};
+    todayAppo.forEach(a => {
+        const member = membersData.find(m => m.member_name === a.member_name);
+        const team = member ? member.team_name : '不明';
+        if (!teamMap[team]) teamMap[team] = { total: 0, count: 0, projects: {} };
+        teamMap[team].total += (a.amount || 0);
+        teamMap[team].count++;
+        const pn = a.project_name || '不明';
+        if (!teamMap[team].projects[pn]) teamMap[team].projects[pn] = { amount: 0, count: 0 };
+        teamMap[team].projects[pn].amount += (a.amount || 0);
+        teamMap[team].projects[pn].count++;
+    });
+    const teamRanking = Object.entries(teamMap).sort((a, b) => b[1].total - a[1].total);
+    const maxTeamAmount = teamRanking.length > 0 ? teamRanking[0][1].total : 1;
+
+    // 積み上げバー生成関数
+    function stackedBar(projects, maxAmount) {
+        let html = '<div class="today-stacked-bar">';
+        for (const pn of projectNames) {
+            const p = projects[pn];
+            if (!p || p.amount <= 0) continue;
+            const widthPct = (p.amount / maxAmount * 100).toFixed(1);
+            const tooltip = `${pn}\n${p.count}件 / ¥${p.amount.toLocaleString()}`;
+            html += `<div class="today-stacked-segment" data-tooltip="${tooltip.replace(/"/g, '&quot;')}" style="width:${widthPct}%;background:${colorMap[pn]};"></div>`;
+        }
+        html += '</div>';
+        return html;
+    }
+
+    // HTML構築
+    let html = `<div class="today-summary-card">
+        <div class="today-summary-header" onclick="toggleTodaySummary()" style="cursor:pointer;">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <svg id="todaySummaryToggleIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="transition:transform 0.2s;${todaySummaryOpen ? '' : 'transform:rotate(-90deg);'}"><path d="M6 9l6 6 6-6"/></svg>
+                <span>本日の実績</span>
+            </div>
+            <span class="today-summary-total">¥${grandTotal.toLocaleString()}</span>
+        </div>
+        <div id="todaySummaryBody" style="${todaySummaryOpen ? '' : 'display:none;'}">
+        <div class="today-legend">`;
+    projectNames.forEach(pn => {
+        html += `<span class="today-legend-item"><span class="today-legend-dot" style="background:${colorMap[pn]};"></span>${pn}</span>`;
+    });
+    html += `</div>`;
+
+    // メンバーランキング
+    html += `<div class="today-section-label">メンバー別</div>`;
+    html += `<div class="today-ranking">`;
+    memberRanking.forEach(([name, data], i) => {
+        html += `<div class="today-rank-row">
+            <span class="today-rank-num">${i + 1}</span>
+            <span class="today-rank-name">${displayName(name)}</span>
+            <div class="today-rank-bar-wrap">${stackedBar(data.projects, maxMemberAmount)}</div>
+            <span class="today-rank-amount"><span class="today-rank-count">${data.count}件</span>¥${data.total.toLocaleString()}</span>
+        </div>`;
+    });
+    html += `</div>`;
+
+    // チーム別
+    html += `<div class="today-section-label">チーム別</div>`;
+    html += `<div class="today-ranking">`;
+    teamRanking.forEach(([name, data]) => {
+        html += `<div class="today-rank-row">
+            <span class="today-rank-name" style="min-width:80px;">${name}</span>
+            <div class="today-rank-bar-wrap">${stackedBar(data.projects, maxTeamAmount)}</div>
+            <span class="today-rank-amount"><span class="today-rank-count">${data.count}件</span>¥${data.total.toLocaleString()}</span>
+        </div>`;
+    });
+    html += `</div>`;
+
+    html += `</div></div>`;
+    document.getElementById('todaySummary').innerHTML = html;
+
+    // カスタムツールチップ
+    initTodayTooltips();
+}
+
+function initTodayTooltips() {
+    let tip = document.getElementById('todayTooltip');
+    if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'todayTooltip';
+        tip.className = 'today-tooltip';
+        document.body.appendChild(tip);
+    }
+
+    document.querySelectorAll('.today-stacked-segment').forEach(el => {
+        el.addEventListener('mouseenter', e => {
+            const text = el.getAttribute('data-tooltip');
+            if (!text) return;
+            tip.innerHTML = text.replace(/\n/g, '<br>');
+            tip.style.display = 'block';
+            const rect = el.getBoundingClientRect();
+            tip.style.left = (rect.left + rect.width / 2) + 'px';
+            tip.style.top = (rect.top - 8) + 'px';
+        });
+        el.addEventListener('mouseleave', () => {
+            tip.style.display = 'none';
+        });
+    });
+}
+
 // ==================== Tab 1: 概要 ====================
 function renderOverview(perfData, appoData, execAppoData, filter) {
     const ym = filter.month;
@@ -304,6 +527,9 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
 
     document.getElementById('progressBadge').textContent = `標準進捗: ${standardProgress}%`;
     document.getElementById('dateInfo').textContent = `${ym} | 経過 ${elapsed}日 / 全${totalDays}営業日`;
+
+    // 本日サマリー
+    renderTodaySummary(appoData);
 
     // 取得目標 進捗バー
     const acqRate = monthlyTarget > 0 ? Math.round(acquisitionAmount / monthlyTarget * 1000) / 10 : 0;
@@ -369,22 +595,8 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
         `<div class="alert-banner"><span class="alert-banner-icon">&#9888;</span><span class="alert-banner-text">${a}</span></div>`
     ).join('');
 
-    // 必要アポ数
+    // appoCount は KPIカードで使用
     const appoCount = appoData.length;
-    if (remaining > 0 && monthlyTarget > acquisitionAmount) {
-        const avgUnitPrice = appoCount > 0 ? Math.round(acquisitionAmount / appoCount) : 30000;
-        const neededAppo = Math.ceil((monthlyTarget - acquisitionAmount) / avgUnitPrice);
-        const dailyAppo = Math.ceil(neededAppo / remaining);
-        document.getElementById('requiredAppoCard').innerHTML = `
-            <div class="required-appo-card">
-                <div class="required-appo-label">目標達成に必要な残アポ数</div>
-                <div class="required-appo-value">${neededAppo}件</div>
-                <div class="required-appo-label">（日次 ${dailyAppo}件 × 残${remaining}日 | 平均単価 ¥${avgUnitPrice.toLocaleString()}）</div>
-            </div>
-        `;
-    } else {
-        document.getElementById('requiredAppoCard').innerHTML = '';
-    }
 
     // KPIカード
     document.getElementById('kpiCards').innerHTML = `
@@ -432,7 +644,7 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
 function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
     const ym = document.getElementById('filterMonth').value;
 
-    const teamNames = ['野口Team', '坪井Team', '松居Team'];
+    const teamNames = ['野口Team', '坪井Team', '松居Team', '宮城Team'];
     let html = '<div class="team-grid">';
 
     teamNames.forEach(teamName => {
@@ -614,7 +826,7 @@ function renderAppointments() {
     // テーブル用データ: 今日までフィルタ + ステータスフィルタ
     let tableData = allData;
     if (!appoShowAll) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = formatDate(new Date());
         tableData = tableData.filter(a => a.scheduled_date <= today);
     }
     const filtered = currentAppoFilter === 'all' ? tableData : tableData.filter(a => a.status === currentAppoFilter);
@@ -680,7 +892,6 @@ function filterAppoStatus(status) {
     document.querySelectorAll('.appo-status-tab').forEach(tab => {
         tab.classList.toggle('active', tab.dataset.status === status);
     });
-    const filter = getFilters();
     renderAppointments();
 }
 
@@ -696,7 +907,7 @@ function toggleAppoRange() {
 async function updateAppoStatus(id, newStatus) {
     console.log('updateAppoStatus called:', id, newStatus);
     try {
-        const now = new Date().toISOString().split('T')[0];
+        const now = formatDate(new Date());
         if (newStatus === '未確認') {
             await executeTurso(
                 "UPDATE appointments SET status = ?, confirmation_date = NULL, confirmed_by = NULL, updated_at = datetime('now') WHERE id = ?",
@@ -792,8 +1003,9 @@ function renderYield(perfData, filter) {
 
         // 単価 × 架電toアポ率
         const avgUnit = a > 0 ? amt / a : 0;
-        const profitIndex = c > 0 ? (avgUnit * a / c).toFixed(0) : '-';
-        const alertFlag = typeof profitIndex === 'string' ? false : parseFloat(profitIndex) < 7;
+        const profitIndexNum = c > 0 ? avgUnit * a / c : null;
+        const profitIndex = profitIndexNum !== null ? profitIndexNum.toFixed(0) : '-';
+        const alertFlag = profitIndexNum !== null && profitIndexNum < 7;
 
         yieldRows += `
             <tr${alertFlag ? ' style="background:var(--red-50);"' : ''}>
@@ -1518,7 +1730,7 @@ function renderSettings() {
     `;
 
     // チーム目標
-    ['野口Team', '松居Team', '坪井Team'].forEach(team => {
+    ['野口Team', '松居Team', '坪井Team', '宮城Team'].forEach(team => {
         const t = getTarget('team', team, ym);
         targetHtml += `
             <div class="settings-item">
@@ -1575,7 +1787,7 @@ async function saveTargets() {
         await upsertTarget('total', 'all', ym, totalVal);
 
         // チーム目標
-        for (const team of ['野口Team', '松居Team', '坪井Team']) {
+        for (const team of ['野口Team', '松居Team', '坪井Team', '宮城Team']) {
             const val = parseInt(document.getElementById(`target_team_${team}`).value) || 0;
             await upsertTarget('team', team, ym, val);
         }

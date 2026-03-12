@@ -94,6 +94,9 @@ function syncPerformanceToTursoSeika() {
   if (errorCount > 0) {
     sendSlackNotificationSeika('⚠️ ' + summary);
   }
+
+  // 非正規名のクリーンアップ
+  cleanupNonCanonicalNames();
 }
 
 /**
@@ -111,7 +114,7 @@ function upsertPerformanceBatch(rows) {
 
     // appointment_amountはスプシに存在しないため0（後でprojectsテーブルの単価から計算）
     const args = [
-      String(memberName || '').trim(),
+      normalizeMemberName(memberName),
       String(projectName || '').trim(),
       formattedDate,
       parseFloat(callHours) || 0,
@@ -272,6 +275,9 @@ function syncSalesReportToTursoSeika() {
   }
 
   Logger.log('売上報告同期完了: ' + upserted + '件, エラー' + errors + '件');
+
+  // 非正規名のクリーンアップ
+  cleanupNonCanonicalNames();
 }
 
 /**
@@ -284,7 +290,7 @@ function upsertAppointmentBatch(rows) {
     // A:営業担当者, B:売上種別, C:案件名, D:会社名, E:取得日, F:実施日時, G:金額,
     // H:部署, I:役職, J:名前, K:電話番号, L:メールアドレス, M:架電ヒアリング,
     // N:営業区分, O:リスケ, P:取引
-    const memberName = String(row[0] || '').trim();       // A: 営業担当者
+    const memberName = normalizeMemberName(row[0]);         // A: 営業担当者
     const projectName = String(row[2] || '').trim();      // C: 案件名
     const customerName = String(row[3] || '').trim();     // D: 会社名
     const acquisitionDate = formatDateGAS(row[4]);        // E: 取得日
@@ -337,4 +343,43 @@ function upsertAppointmentBatch(rows) {
   }
 
   return { success, errors };
+}
+
+// ==================== 非正規名クリーンアップ ====================
+
+/**
+ * DB内の非正規メンバー名を検出して削除
+ * 正規名: 野口, 中村た, 田中か, 辻森, 松居, 山本, 美除, 坪井, 村松, 田中颯汰, 宮城
+ */
+function cleanupNonCanonicalNames() {
+  var canonicalNames = ['野口', '中村た', '田中か', '辻森', '松居', '山本', '美除', '坪井', '村松', '田中颯汰', '宮城'];
+  var inClause = canonicalNames.map(function(n) { return "'" + n + "'"; }).join(',');
+
+  var requests = [
+    {
+      type: 'execute',
+      stmt: { sql: "DELETE FROM appointments WHERE member_name NOT IN (" + inClause + ")" }
+    },
+    {
+      type: 'execute',
+      stmt: { sql: "DELETE FROM performance_rawdata WHERE member_name NOT IN (" + inClause + ")" }
+    }
+  ];
+
+  try {
+    var result = executeTursoPipeline(requests);
+    var appoDeleted = 0;
+    var perfDeleted = 0;
+    if (result.results && result.results[0] && result.results[0].type === 'ok') {
+      appoDeleted = result.results[0].response.result.affected_row_count || 0;
+    }
+    if (result.results && result.results[1] && result.results[1].type === 'ok') {
+      perfDeleted = result.results[1].response.result.affected_row_count || 0;
+    }
+    if (appoDeleted > 0 || perfDeleted > 0) {
+      Logger.log('非正規名クリーンアップ: appointments ' + appoDeleted + '行, performance ' + perfDeleted + '行 削除');
+    }
+  } catch (e) {
+    Logger.log('クリーンアップエラー: ' + e.message);
+  }
 }
