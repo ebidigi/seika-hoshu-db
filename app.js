@@ -1048,6 +1048,13 @@ function renderYield(perfData, filter) {
             ? membersData.filter(m => m.member_name === filter.member)
             : membersData;
 
+    // 基準値（赤字判定用）
+    const BL_CTP = 15;   // 架電toPR 15%
+    const BL_PTA = 30;   // PRtoアポ 30%
+    const BL_CTA = 3;    // 架電toアポ 3%
+
+    const redStyle = (val, baseline) => val !== '-' && parseFloat(val) < baseline ? ' style="color:var(--primary-red);font-weight:600;"' : '';
+
     let yieldRows = '';
     let totalExecCount = 0;
     entities.forEach(entity => {
@@ -1055,7 +1062,6 @@ function renderYield(perfData, filter) {
         const c = sum(ep, 'call_count');
         const p = sum(ep, 'pr_count');
         const a = sum(ep, 'appointment_count');
-        const amt = sum(ep, 'appointment_amount');
 
         // 実施数
         const memberExec = executionAppoData.filter(d => d.member_name === entity.member_name && d.status === '実施');
@@ -1067,24 +1073,17 @@ function renderYield(perfData, filter) {
         const pta = p > 0 ? (a / p * 100).toFixed(1) : '-';
         const cta = c > 0 ? (a / c * 100).toFixed(2) : '-';
 
-        // 単価 × 架電toアポ率
-        const avgUnit = a > 0 ? amt / a : 0;
-        const profitIndexNum = c > 0 ? avgUnit * a / c : null;
-        const profitIndex = profitIndexNum !== null ? profitIndexNum.toFixed(0) : '-';
-        const alertFlag = profitIndexNum !== null && profitIndexNum < 7;
-
         yieldRows += `
-            <tr${alertFlag ? ' style="background:var(--red-50);"' : ''}>
+            <tr>
                 <td>${displayName(entity.member_name)}</td>
                 <td class="text-right number">${c.toLocaleString()}</td>
                 <td class="text-right number">${p.toLocaleString()}</td>
                 <td class="text-right number">${a}</td>
                 <td class="text-right number">${e}</td>
-                <td class="text-right number">${ctp}%</td>
-                <td class="text-right number">${pta}%</td>
+                <td class="text-right number"${redStyle(ctp, BL_CTP)}>${ctp}%</td>
+                <td class="text-right number"${redStyle(pta, BL_PTA)}>${pta}%</td>
                 <td class="text-right number">${ate}%</td>
-                <td class="text-right number">${cta}%</td>
-                <td class="text-right number">${profitIndex}${alertFlag ? ' <span style="color:var(--primary-red);font-weight:700;">&#9873;</span>' : ''}</td>
+                <td class="text-right number"${redStyle(cta, BL_CTA)}>${cta}%</td>
             </tr>
         `;
     });
@@ -1098,11 +1097,10 @@ function renderYield(perfData, filter) {
             <td class="text-right number">${totalPR.toLocaleString()}</td>
             <td class="text-right number">${totalAppo}</td>
             <td class="text-right number">${totalExecCount}</td>
-            <td class="text-right number">${callToPR.toFixed(1)}%</td>
-            <td class="text-right number">${prToAppo.toFixed(1)}%</td>
+            <td class="text-right number"${redStyle(callToPR.toFixed(1), BL_CTP)}>${callToPR.toFixed(1)}%</td>
+            <td class="text-right number"${redStyle(prToAppo.toFixed(1), BL_PTA)}>${prToAppo.toFixed(1)}%</td>
             <td class="text-right number">${totalAte}%</td>
-            <td class="text-right number">${callToAppo.toFixed(2)}%</td>
-            <td class="text-right number">-</td>
+            <td class="text-right number"${redStyle(callToAppo.toFixed(2), BL_CTA)}>${callToAppo.toFixed(2)}%</td>
         </tr>
     `;
     document.getElementById('yieldTableBody').innerHTML = yieldRows;
