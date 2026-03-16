@@ -1228,7 +1228,16 @@ function renderProjectYield(perfData) {
         projectMap[d.project_name].amount += d.appointment_amount || 0;
     });
 
+    const BASELINE = {
+        callToPR: 0.15,
+        prToAppo: 0.30,
+        callToAppo: 0.03,
+        callsPerHour: 40
+    };
+
     let rows = '';
+    let projDiagHtml = '';
+
     Object.keys(projectMap).sort().forEach(name => {
         const p = projectMap[name];
         const ctp = p.calls > 0 ? (p.pr / p.calls * 100).toFixed(1) : '-';
@@ -1252,9 +1261,47 @@ function renderProjectYield(perfData) {
                 <td>${alertFlag ? '<span style="color:var(--primary-red);font-weight:700;">&#9873; 収益性アラート</span>' : '<span style="color:var(--success);">OK</span>'}</td>
             </tr>
         `;
+
+        // 案件別診断
+        if (p.calls < 30) return; // データ少量の案件はスキップ
+
+        const gaps = [];
+        const actCtp = p.calls > 0 ? p.pr / p.calls : 0;
+        const actPta = p.pr > 0 ? p.appo / p.pr : 0;
+        const actCta = p.calls > 0 ? p.appo / p.calls : 0;
+
+        if (p.calls > 0) gaps.push({ label: '架電to着電率', actual: actCtp, baseline: BASELINE.callToPR, ratio: actCtp / BASELINE.callToPR - 1, suggestion: 'リスト品質・時間帯の見直し' });
+        if (p.pr > 0) gaps.push({ label: '着電toアポ率', actual: actPta, baseline: BASELINE.prToAppo, ratio: actPta / BASELINE.prToAppo - 1, suggestion: 'トークスクリプト改善・ヒアリング精度向上' });
+        if (p.calls > 0) gaps.push({ label: '架電toアポ率', actual: actCta, baseline: BASELINE.callToAppo, ratio: actCta / BASELINE.callToAppo - 1, suggestion: 'リスト品質とトーク品質の両面から改善' });
+
+        gaps.sort((a, b) => a.ratio - b.ratio);
+        const worst = gaps.length > 0 && gaps[0].ratio < -0.1 ? gaps[0] : null;
+
+        let cards = gaps.map((g, i) => {
+            const pct = (g.actual * 100).toFixed(1);
+            const basePct = (g.baseline * 100).toFixed(1);
+            const gapPct = (g.ratio * 100).toFixed(0);
+            const isWorst = i === 0 && g.ratio < -0.1;
+            let text = `${pct}%（基準: ${basePct}%、乖離: ${g.ratio >= 0 ? '+' : ''}${gapPct}%）`;
+            if (isWorst) text += ` → ${g.suggestion}`;
+            else if (g.ratio < -0.1) text += ` → ${g.suggestion}`;
+            return `<span class="${g.ratio < -0.1 ? 'diagnosis-tag alert' : 'diagnosis-tag ok'}">${g.label}: ${text}</span>`;
+        }).join('');
+
+        if (alertFlag) {
+            cards += `<span class="diagnosis-tag alert">収益性: 単価×架toア = ${profitCheck.toFixed(1)}（基準: 7以上）</span>`;
+        }
+
+        projDiagHtml += `
+            <div class="project-diagnosis-card${worst ? ' has-alert' : ''}">
+                <div class="project-diagnosis-name">${name}</div>
+                <div class="project-diagnosis-tags">${cards}</div>
+            </div>
+        `;
     });
 
     document.getElementById('projectYieldTableBody').innerHTML = rows;
+    document.getElementById('projectDiagnosisGrid').innerHTML = projDiagHtml || '<div style="color:var(--text-light);font-size:0.85rem;">十分なデータがある案件がありません</div>';
 }
 
 // ==================== Tab 4: 案件管理 ====================
