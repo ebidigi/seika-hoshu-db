@@ -595,41 +595,39 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
         `<div class="alert-banner"><span class="alert-banner-icon">&#9888;</span><span class="alert-banner-text">${a}</span></div>`
     ).join('');
 
-    // appoCount は KPIカードで使用
+    // 歩留まり＆キャンセル率
     const appoCount = appoData.length;
+    const callToPR = totalCalls > 0 ? (totalPR / totalCalls * 100).toFixed(1) : '-';
+    const prToAppo = totalPR > 0 ? (appoCount / totalPR * 100).toFixed(1) : '-';
+    const execCount = execAppoData.length;
+    const execConfirmedCount = execAppoData.filter(a => a.status === '実施').length;
+    const execCancelledCount = execAppoData.filter(a => a.status === 'キャンセル').length;
+    const execRescheduleCount = execAppoData.filter(a => a.status === 'リスケ').length;
+    const executionRate = execCount > 0 ? (execConfirmedCount / execCount * 100).toFixed(1) : '-';
+    const cancelRate = execCount > 0 ? (execCancelledCount / execCount * 100).toFixed(1) : '-';
+    const rescheduleRate = execCount > 0 ? (execRescheduleCount / execCount * 100).toFixed(1) : '-';
 
-    // KPIカード
-    document.getElementById('kpiCards').innerHTML = `
-        <div class="kpi-grid">
-            <div class="kpi-card highlight">
-                <div class="kpi-label">取得金額</div>
-                <div class="kpi-value">¥${acquisitionAmount.toLocaleString()}</div>
-                <div class="kpi-sub">目標 ¥${monthlyTarget.toLocaleString()} | ${acqRate}%</div>
+    document.getElementById('conversionRates').innerHTML = `
+        <div class="conversion-rates-row">
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value">${callToPR}%</div>
+                <div class="conversion-rate-label">架電→PR率</div>
             </div>
-            <div class="kpi-card highlight">
-                <div class="kpi-label">実施見込金額</div>
-                <div class="kpi-value">¥${execExpected.toLocaleString()}</div>
-                <div class="kpi-sub">確定 ¥${execConfirmed.toLocaleString()} | 未確認 ¥${execUnconfirmed.toLocaleString()}</div>
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value">${prToAppo}%</div>
+                <div class="conversion-rate-label">PR→アポ率</div>
             </div>
-            <div class="kpi-card">
-                <div class="kpi-label">架電数</div>
-                <div class="kpi-value">${totalCalls.toLocaleString()}</div>
-                <div class="kpi-sub">架電/H: ${totalHours > 0 ? (totalCalls / totalHours).toFixed(1) : '-'}</div>
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value" style="color:var(--primary-blue);">${executionRate}%</div>
+                <div class="conversion-rate-label">実施率</div>
             </div>
-            <div class="kpi-card">
-                <div class="kpi-label">PR数</div>
-                <div class="kpi-value">${totalPR.toLocaleString()}</div>
-                <div class="kpi-sub">架電toPR: ${totalCalls > 0 ? (totalPR / totalCalls * 100).toFixed(1) + '%' : '-'}</div>
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value" style="color:${cancelRate !== '-' && parseFloat(cancelRate) > 15 ? 'var(--primary-red)' : 'var(--text-dark)'};">${cancelRate}%</div>
+                <div class="conversion-rate-label">キャンセル率</div>
             </div>
-            <div class="kpi-card">
-                <div class="kpi-label">アポ数（取得）</div>
-                <div class="kpi-value">${appoCount.toLocaleString()}</div>
-                <div class="kpi-sub">PRtoアポ: ${totalPR > 0 ? (appoCount / totalPR * 100).toFixed(1) + '%' : '-'}</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-label">稼働時間</div>
-                <div class="kpi-value">${totalHours.toFixed(1)}h</div>
-                <div class="kpi-sub">アポ数（実績rawdata）: ${totalAppo}</div>
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value" style="color:${rescheduleRate !== '-' && parseFloat(rescheduleRate) > 15 ? '#8a7a00' : 'var(--text-dark)'};">${rescheduleRate}%</div>
+                <div class="conversion-rate-label">リスケ率</div>
             </div>
         </div>
     `;
@@ -637,8 +635,11 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
     // チームカード
     renderTeamCards(perfData, appoData, execAppoData, standardProgress);
 
-    // メンバーカード
-    renderMemberCards(perfData, appoData, standardProgress);
+    // メンバー別売上カード
+    renderMemberSalesCards(appoData, execAppoData, standardProgress);
+
+    // メンバー別稼働グラフ
+    renderMemberGraphs(perfData);
 }
 
 function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
@@ -649,17 +650,11 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
 
     teamNames.forEach(teamName => {
         const teamMembers = membersData.filter(m => m.team_name === teamName).map(m => m.member_name);
-        const teamPerf = perfData.filter(d => teamMembers.includes(d.member_name));
         const teamAppo = appoData.filter(d => teamMembers.includes(d.member_name));
         const teamExec = execAppoData.filter(d => teamMembers.includes(d.member_name));
 
-        const calls = sum(teamPerf, 'call_count');
-        const pr = sum(teamPerf, 'pr_count');
-        const hours = sum(teamPerf, 'call_hours');
-
         // 取得金額（当月取得アポ）
         const acqAmount = teamAppo.reduce((s, a) => s + (a.amount || 0), 0);
-        const acqCount = teamAppo.length;
 
         // 実施金額（当月実施予定、前月取得含む）
         const execAmount = teamExec.filter(a => a.status !== 'キャンセル' && a.status !== 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
@@ -693,24 +688,6 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
                     <div class="progress-bar-fill" style="width:${Math.min(acqRate, 100)}%;background:${barColor};"></div>
                     <div class="progress-bar-line" style="left:${Math.min(standardProgress, 100)}%;"></div>
                 </div>
-                <div class="team-stats">
-                    <div class="team-stat">
-                        <div class="team-stat-label">架電</div>
-                        <div class="team-stat-value">${calls.toLocaleString()}</div>
-                    </div>
-                    <div class="team-stat">
-                        <div class="team-stat-label">PR</div>
-                        <div class="team-stat-value">${pr}</div>
-                    </div>
-                    <div class="team-stat">
-                        <div class="team-stat-label">アポ</div>
-                        <div class="team-stat-value">${acqCount}</div>
-                    </div>
-                    <div class="team-stat">
-                        <div class="team-stat-label">時間</div>
-                        <div class="team-stat-value">${hours.toFixed(0)}h</div>
-                    </div>
-                </div>
             </div>
         `;
     });
@@ -719,24 +696,25 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
     document.getElementById('teamCards').innerHTML = html;
 }
 
-function renderMemberCards(perfData, appoData, standardProgress) {
+function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
     let html = '<div class="member-grid">';
+    const ym = document.getElementById('filterMonth').value;
 
     membersData.forEach(member => {
-        const memberPerf = perfData.filter(d => d.member_name === member.member_name);
         const memberAppo = appoData.filter(d => d.member_name === member.member_name);
-        const calls = sum(memberPerf, 'call_count');
-        const pr = sum(memberPerf, 'pr_count');
-        const appo = memberAppo.length;
-        const amount = memberAppo.reduce((s, a) => s + (a.amount || 0), 0);
-        const hours = sum(memberPerf, 'call_hours');
+        const acqAmount = memberAppo.reduce((s, a) => s + (a.amount || 0), 0);
 
-        const ym = document.getElementById('filterMonth').value;
+        const memberExec = execAppoData.filter(d => d.member_name === member.member_name);
+        const execAmount = memberExec.filter(a => a.status !== 'キャンセル' && a.status !== 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
+
         const memberTarget = getTarget('member', member.member_name, ym);
-        const target = memberTarget ? memberTarget.appointment_amount_target : 0;
-        const rate = target > 0 ? Math.round(amount / target * 1000) / 10 : 0;
+        const acqTarget = memberTarget ? memberTarget.appointment_amount_target : 0;
+        const execTarget = memberTarget ? (memberTarget.execution_target || acqTarget) : 0;
+        const acqRate = acqTarget > 0 ? Math.round(acqAmount / acqTarget * 1000) / 10 : 0;
+        const execRate = execTarget > 0 ? Math.round(execAmount / execTarget * 1000) / 10 : 0;
 
-        const barColor = rate >= standardProgress ? 'var(--success)' : rate >= standardProgress * 0.8 ? 'var(--warning)' : 'var(--danger)';
+        const acqBarColor = acqRate >= standardProgress ? 'var(--success)' : acqRate >= standardProgress * 0.8 ? 'var(--warning)' : 'var(--danger)';
+        const execBarColor = execRate >= standardProgress ? 'var(--success)' : execRate >= standardProgress * 0.8 ? 'var(--warning)' : 'var(--danger)';
 
         html += `
             <div class="member-card">
@@ -744,29 +722,28 @@ function renderMemberCards(perfData, appoData, standardProgress) {
                     <span class="member-name">${displayName(member.member_name)}</span>
                     <span class="member-team-badge">${member.team_name}</span>
                 </div>
-                ${target > 0 ? `
-                <div class="progress-bar">
-                    <div class="progress-bar-fill" style="width:${Math.min(rate, 100)}%;background:${barColor};"></div>
-                    <div class="progress-bar-line" style="left:${Math.min(standardProgress || 0, 100)}%;"></div>
-                </div>
-                <div style="font-size:0.75rem;color:var(--text-light);margin-bottom:4px;">¥${amount.toLocaleString()} / ¥${target.toLocaleString()} (${rate}%)</div>
-                ` : `<div style="font-size:0.75rem;color:var(--text-light);margin-bottom:4px;">¥${amount.toLocaleString()}</div>`}
-                <div class="member-stats">
-                    <div class="member-stat">
-                        <div class="member-stat-label">架電</div>
-                        <div class="member-stat-value">${calls}</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;">
+                    <div>
+                        <div style="font-size:0.7rem;color:var(--text-light);">取得</div>
+                        <div style="font-size:1rem;font-weight:700;font-family:'Poppins',sans-serif;">¥${acqAmount.toLocaleString()}</div>
+                        ${acqTarget > 0 ? `
+                        <div class="progress-bar" style="margin-top:4px;">
+                            <div class="progress-bar-fill" style="width:${Math.min(acqRate, 100)}%;background:${acqBarColor};"></div>
+                            <div class="progress-bar-line" style="left:${Math.min(standardProgress || 0, 100)}%;"></div>
+                        </div>
+                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(acqTarget / 10000).toFixed(0)}万 | ${acqRate}%</div>
+                        ` : ''}
                     </div>
-                    <div class="member-stat">
-                        <div class="member-stat-label">PR</div>
-                        <div class="member-stat-value">${pr}</div>
-                    </div>
-                    <div class="member-stat">
-                        <div class="member-stat-label">アポ</div>
-                        <div class="member-stat-value">${appo}</div>
-                    </div>
-                    <div class="member-stat">
-                        <div class="member-stat-label">時間</div>
-                        <div class="member-stat-value">${hours.toFixed(1)}h</div>
+                    <div>
+                        <div style="font-size:0.7rem;color:var(--text-light);">実施見込</div>
+                        <div style="font-size:1rem;font-weight:700;font-family:'Poppins',sans-serif;">¥${execAmount.toLocaleString()}</div>
+                        ${execTarget > 0 ? `
+                        <div class="progress-bar" style="margin-top:4px;">
+                            <div class="progress-bar-fill" style="width:${Math.min(execRate, 100)}%;background:${execBarColor};"></div>
+                            <div class="progress-bar-line" style="left:${Math.min(standardProgress || 0, 100)}%;"></div>
+                        </div>
+                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(execTarget / 10000).toFixed(0)}万 | ${execRate}%</div>
+                        ` : ''}
                     </div>
                 </div>
             </div>
@@ -774,7 +751,49 @@ function renderMemberCards(perfData, appoData, standardProgress) {
     });
 
     html += '</div>';
-    document.getElementById('memberCards').innerHTML = html;
+    document.getElementById('memberSalesCards').innerHTML = html;
+}
+
+function renderMemberGraphs(perfData) {
+    const metrics = [
+        { key: 'call_count', label: '架電数', color: 'var(--blue-200)' },
+        { key: 'pr_count', label: 'PR数', color: 'var(--cyan-200)' },
+        { key: 'appointment_count', label: 'アポ数', color: 'var(--yellow-200)' },
+        { key: 'call_hours', label: '稼働時間', color: 'var(--red-200)', suffix: 'h', decimals: 1 }
+    ];
+
+    let html = '';
+
+    metrics.forEach(metric => {
+        const memberValues = membersData.map(member => {
+            const memberPerf = perfData.filter(d => d.member_name === member.member_name);
+            const value = sum(memberPerf, metric.key);
+            return { name: displayName(member.member_name), value };
+        }).sort((a, b) => b.value - a.value);
+
+        const maxValue = Math.max(...memberValues.map(m => m.value), 1);
+
+        html += `<div class="member-graph-section">
+            <div class="member-graph-title">${metric.label}</div>
+            <div class="member-graph-bars">`;
+
+        memberValues.forEach(m => {
+            const pct = maxValue > 0 ? (m.value / maxValue * 100) : 0;
+            const displayVal = metric.decimals ? m.value.toFixed(metric.decimals) : m.value.toLocaleString();
+            html += `
+                <div class="member-graph-row">
+                    <div class="member-graph-name">${m.name}</div>
+                    <div class="member-graph-bar-wrap">
+                        <div class="member-graph-bar" style="width:${pct}%;background:${metric.color};"></div>
+                    </div>
+                    <div class="member-graph-value">${displayVal}${metric.suffix || ''}</div>
+                </div>`;
+        });
+
+        html += `</div></div>`;
+    });
+
+    document.getElementById('memberGraphs').innerHTML = html;
 }
 
 // ==================== Tab 2: アポ確認管理 ====================
@@ -1718,24 +1737,37 @@ function switchAnalysisChart(type) {
 function renderSettings() {
     // 月次目標設定
     const ym = document.getElementById('filterMonth').value;
-    let targetHtml = '';
+    let acqHtml = '';
+    let execHtml = '';
 
     // 全体目標
     const totalTarget = getTarget('total', 'all', ym);
-    targetHtml += `
+    acqHtml += `
         <div class="settings-item">
-            <label>全体 売上目標</label>
+            <label>全体</label>
             <input type="number" id="target_total_all" value="${totalTarget ? totalTarget.appointment_amount_target : settingsMap.monthly_target_total || 9000000}" min="0">
+        </div>
+    `;
+    execHtml += `
+        <div class="settings-item">
+            <label>全体</label>
+            <input type="number" id="target_total_all_exec" value="${totalTarget ? (totalTarget.execution_target || 0) : 0}" min="0">
         </div>
     `;
 
     // チーム目標
     ['野口Team', '松居Team', '坪井Team', '宮城Team'].forEach(team => {
         const t = getTarget('team', team, ym);
-        targetHtml += `
+        acqHtml += `
             <div class="settings-item">
-                <label>${team} 売上目標</label>
+                <label>${team}</label>
                 <input type="number" id="target_team_${team}" value="${t ? t.appointment_amount_target : 0}" min="0">
+            </div>
+        `;
+        execHtml += `
+            <div class="settings-item">
+                <label>${team}</label>
+                <input type="number" id="target_team_${team}_exec" value="${t ? (t.execution_target || 0) : 0}" min="0">
             </div>
         `;
     });
@@ -1743,15 +1775,22 @@ function renderSettings() {
     // メンバー目標
     membersData.forEach(m => {
         const t = getTarget('member', m.member_name, ym);
-        targetHtml += `
+        acqHtml += `
             <div class="settings-item">
-                <label>${displayName(m.member_name)} 売上目標</label>
+                <label>${displayName(m.member_name)}</label>
                 <input type="number" id="target_member_${m.member_name}" value="${t ? t.appointment_amount_target : 0}" min="0">
+            </div>
+        `;
+        execHtml += `
+            <div class="settings-item">
+                <label>${displayName(m.member_name)}</label>
+                <input type="number" id="target_member_${m.member_name}_exec" value="${t ? (t.execution_target || 0) : 0}" min="0">
             </div>
         `;
     });
 
-    document.getElementById('targetSettingsGrid').innerHTML = targetHtml;
+    document.getElementById('acqTargetSettingsGrid').innerHTML = acqHtml;
+    document.getElementById('execTargetSettingsGrid').innerHTML = execHtml;
 
     // レート設定
     document.getElementById('settingCancelRate').value = settingsMap.cancel_rate_default || '0.8';
@@ -1784,18 +1823,21 @@ async function saveTargets() {
     try {
         // 全体目標
         const totalVal = parseInt(document.getElementById('target_total_all').value) || 0;
-        await upsertTarget('total', 'all', ym, totalVal);
+        const totalExec = parseInt(document.getElementById('target_total_all_exec').value) || 0;
+        await upsertTarget('total', 'all', ym, totalVal, totalExec);
 
         // チーム目標
         for (const team of ['野口Team', '松居Team', '坪井Team', '宮城Team']) {
             const val = parseInt(document.getElementById(`target_team_${team}`).value) || 0;
-            await upsertTarget('team', team, ym, val);
+            const execVal = parseInt(document.getElementById(`target_team_${team}_exec`).value) || 0;
+            await upsertTarget('team', team, ym, val, execVal);
         }
 
         // メンバー目標
         for (const m of membersData) {
             const val = parseInt(document.getElementById(`target_member_${m.member_name}`).value) || 0;
-            await upsertTarget('member', m.member_name, ym, val);
+            const execVal = parseInt(document.getElementById(`target_member_${m.member_name}_exec`).value) || 0;
+            await upsertTarget('member', m.member_name, ym, val, execVal);
         }
 
         // 目標再読み込み
@@ -1814,13 +1856,14 @@ async function saveTargets() {
     }
 }
 
-async function upsertTarget(type, name, ym, amount) {
+async function upsertTarget(type, name, ym, amount, execAmount) {
     await executeTurso(
-        `INSERT INTO targets (id, target_type, target_name, year_month, appointment_amount_target)
-         VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?)
+        `INSERT INTO targets (id, target_type, target_name, year_month, appointment_amount_target, execution_target)
+         VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
          ON CONFLICT(target_type, target_name, year_month)
-         DO UPDATE SET appointment_amount_target = excluded.appointment_amount_target`,
-        [type, name, ym, amount]
+         DO UPDATE SET appointment_amount_target = excluded.appointment_amount_target,
+                       execution_target = excluded.execution_target`,
+        [type, name, ym, amount, execAmount || 0]
     );
 }
 

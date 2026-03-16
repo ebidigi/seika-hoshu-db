@@ -123,13 +123,16 @@
                     <div id="salesTargetCard"></div>
                     <div id="alertBanners"></div>
                     <div id="todaySummary"></div>
-                    <div id="kpiCards"></div>
+                    <div id="conversionRates"></div>
 
-                    <div class="section-title">チーム別 進捗</div>
+                    <div class="section-title">チーム別 売上進捗</div>
                     <div id="teamCards"></div>
 
-                    <div class="section-title">メンバー別 進捗</div>
-                    <div id="memberCards"></div>
+                    <div class="section-title">メンバー別 売上</div>
+                    <div id="memberSalesCards"></div>
+
+                    <div class="section-title">メンバー別 稼働実績</div>
+                    <div id="memberGraphs"></div>
                 </div>
 
                 <!-- Tab 2: アポ確認管理 -->
@@ -323,11 +326,18 @@
 
                 <!-- Tab 6: 設定 -->
                 <div class="tab-content" id="tab-settings">
-                    <!-- 月次目標 -->
+                    <!-- 取得目標 -->
                     <div class="settings-section">
-                        <h3>月次目標設定</h3>
+                        <h3>取得目標設定</h3>
                         <div class="settings-message" id="targetMessage"></div>
-                        <div class="settings-grid" id="targetSettingsGrid"></div>
+                        <div class="settings-grid" id="acqTargetSettingsGrid"></div>
+                        <button class="save-btn" onclick="saveTargets()">保存</button>
+                    </div>
+
+                    <!-- 実施目標 -->
+                    <div class="settings-section">
+                        <h3>実施目標設定</h3>
+                        <div class="settings-grid" id="execTargetSettingsGrid"></div>
                         <button class="save-btn" onclick="saveTargets()">保存</button>
                     </div>
 

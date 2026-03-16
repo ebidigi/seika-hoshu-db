@@ -1414,6 +1414,98 @@ body {
     margin-top: 40px;
 }
 
+/* ========== 歩留まり・キャンセル率カード行 ========== */
+.conversion-rates-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.conversion-rate-card {
+    flex: 1;
+    min-width: 120px;
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 14px 16px;
+    text-align: center;
+}
+
+.conversion-rate-value {
+    font-family: 'Poppins', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-dark);
+}
+
+.conversion-rate-label {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    margin-top: 2px;
+}
+
+/* ========== メンバー別稼働グラフ ========== */
+.member-graph-section {
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+}
+
+.member-graph-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-dark);
+    margin-bottom: 10px;
+}
+
+.member-graph-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.member-graph-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.member-graph-name {
+    width: 70px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-align: right;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.member-graph-bar-wrap {
+    flex: 1;
+    height: 20px;
+    background: var(--bg-light);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.member-graph-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.4s ease;
+    min-width: 2px;
+}
+
+.member-graph-value {
+    width: 60px;
+    font-family: 'Poppins', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: right;
+    flex-shrink: 0;
+}
+
 /* ========== レスポンシブ ========== */
 @media (max-width: 768px) {
     .sidebar { display: none; }
@@ -1426,6 +1518,8 @@ body {
     .filter-section { flex-direction: column; }
     .funnel-container { flex-direction: column; }
     .page-title-row { flex-direction: column; }
+    .conversion-rates-row { flex-direction: column; }
+    .conversion-rate-card { min-width: auto; }
 }
 
 /* ========== 印刷 ========== */
