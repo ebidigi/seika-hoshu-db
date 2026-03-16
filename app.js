@@ -1247,10 +1247,48 @@ function renderProjectYield(perfData) {
         const proj = projectsData.find(pr => pr.project_name === name);
         const unitPrice = proj ? proj.unit_price : (p.appo > 0 ? Math.round(p.amount / p.appo) : 0);
         const profitCheck = p.calls > 0 ? unitPrice * p.appo / p.calls : 0;
-        const alertFlag = p.calls > 0 && profitCheck < 7;
+        const profitAlert = p.calls > 0 && profitCheck < 7;
+
+        // 各指標の診断
+        const actCtp = p.calls > 0 ? p.pr / p.calls : 0;
+        const actPta = p.pr > 0 ? p.appo / p.pr : 0;
+        const actCta = p.calls > 0 ? p.appo / p.calls : 0;
+        const ctpLow = p.calls >= 30 && actCtp < BASELINE.callToPR * 0.9;
+        const ptaLow = p.pr >= 10 && actPta < BASELINE.prToAppo * 0.9;
+        const ctaLow = p.calls >= 30 && actCta < BASELINE.callToAppo * 0.9;
+        const hasAnyAlert = profitAlert || ctpLow || ptaLow || ctaLow;
+
+        // アラートバッジ
+        let badges = '';
+        if (!hasAnyAlert) {
+            badges = '<span style="color:var(--success);font-size:0.75rem;">OK</span>';
+        } else {
+            if (ctpLow) badges += `<span class="yield-alert-badge alert" title="架電to着電率: ${(actCtp*100).toFixed(1)}%（基準${(BASELINE.callToPR*100)}%）">着電率↓</span>`;
+            if (ptaLow) badges += `<span class="yield-alert-badge alert" title="着電toアポ率: ${(actPta*100).toFixed(1)}%（基準${(BASELINE.prToAppo*100)}%）">アポ率↓</span>`;
+            if (profitAlert) badges += `<span class="yield-alert-badge alert" title="単価×架toア = ${profitCheck.toFixed(1)}（基準: 7以上）">収益性↓</span>`;
+        }
+
+        // 詳細行（クリックで展開）
+        const rowId = `proj-detail-${name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        let detailCells = '';
+        if (hasAnyAlert && p.calls >= 30) {
+            const details = [];
+            if (ctpLow) details.push(`架電to着電率 ${(actCtp*100).toFixed(1)}%（基準 ${(BASELINE.callToPR*100)}%、乖離 ${((actCtp/BASELINE.callToPR-1)*100).toFixed(0)}%） → リスト品質・時間帯の見直し`);
+            if (ptaLow) details.push(`着電toアポ率 ${(actPta*100).toFixed(1)}%（基準 ${(BASELINE.prToAppo*100)}%、乖離 ${((actPta/BASELINE.prToAppo-1)*100).toFixed(0)}%） → トークスクリプト改善・ヒアリング精度向上`);
+            if (ctaLow) details.push(`架電toアポ率 ${(actCta*100).toFixed(2)}%（基準 ${(BASELINE.callToAppo*100)}%、乖離 ${((actCta/BASELINE.callToAppo-1)*100).toFixed(0)}%） → リスト品質とトーク品質の両面から改善`);
+            if (profitAlert) details.push(`収益性指標 ${profitCheck.toFixed(1)}（基準: 7以上） → 単価またはアポ率の改善が必要`);
+
+            detailCells = `<tr id="${rowId}" class="yield-detail-row" style="display:none;">
+                <td colspan="8" style="padding:12px 16px;background:var(--gray-50);">
+                    <div style="font-size:0.8rem;color:var(--text-dark);line-height:1.8;">
+                        ${details.map(d => `<div style="margin-bottom:4px;">・${d}</div>`).join('')}
+                    </div>
+                </td>
+            </tr>`;
+        }
 
         rows += `
-            <tr${alertFlag ? ' style="background:var(--red-50);"' : ''}>
+            <tr${hasAnyAlert ? ' style="background:var(--red-50);cursor:pointer;" onclick="toggleYieldDetail(\'' + rowId + '\')"' : ''}>
                 <td>${name}</td>
                 <td class="text-right number">${p.calls.toLocaleString()}</td>
                 <td class="text-right number">${p.pr.toLocaleString()}</td>
@@ -1258,50 +1296,41 @@ function renderProjectYield(perfData) {
                 <td class="text-right number">${ctp}%</td>
                 <td class="text-right number">${pta}%</td>
                 <td class="text-right number">${cta}%</td>
-                <td>${alertFlag ? '<span style="color:var(--primary-red);font-weight:700;">&#9873; 収益性アラート</span>' : '<span style="color:var(--success);">OK</span>'}</td>
+                <td>${badges}</td>
             </tr>
+            ${detailCells}
         `;
 
-        // 案件別診断
-        if (p.calls < 30) return; // データ少量の案件はスキップ
+        // 診断セクション（アラートありのみ）
+        if (hasAnyAlert && p.calls >= 30) {
+            const gaps = [];
+            if (ctpLow) gaps.push({ label: '架電to着電率', actual: actCtp, baseline: BASELINE.callToPR, suggestion: 'リスト品質・時間帯の見直し' });
+            if (ptaLow) gaps.push({ label: '着電toアポ率', actual: actPta, baseline: BASELINE.prToAppo, suggestion: 'トークスクリプト改善・ヒアリング精度向上' });
+            if (profitAlert) gaps.push({ label: '収益性', actual: profitCheck, baseline: 7, isIndex: true, suggestion: '単価またはアポ率の改善が必要' });
 
-        const gaps = [];
-        const actCtp = p.calls > 0 ? p.pr / p.calls : 0;
-        const actPta = p.pr > 0 ? p.appo / p.pr : 0;
-        const actCta = p.calls > 0 ? p.appo / p.calls : 0;
+            const tags = gaps.map(g => {
+                if (g.isIndex) return `<span class="diagnosis-tag alert">${g.label}: ${g.actual.toFixed(1)}（基準: ${g.baseline}以上） → ${g.suggestion}</span>`;
+                const pct = (g.actual * 100).toFixed(1);
+                const basePct = (g.baseline * 100).toFixed(1);
+                return `<span class="diagnosis-tag alert">${g.label}: ${pct}%（基準: ${basePct}%） → ${g.suggestion}</span>`;
+            }).join('');
 
-        if (p.calls > 0) gaps.push({ label: '架電to着電率', actual: actCtp, baseline: BASELINE.callToPR, ratio: actCtp / BASELINE.callToPR - 1, suggestion: 'リスト品質・時間帯の見直し' });
-        if (p.pr > 0) gaps.push({ label: '着電toアポ率', actual: actPta, baseline: BASELINE.prToAppo, ratio: actPta / BASELINE.prToAppo - 1, suggestion: 'トークスクリプト改善・ヒアリング精度向上' });
-        if (p.calls > 0) gaps.push({ label: '架電toアポ率', actual: actCta, baseline: BASELINE.callToAppo, ratio: actCta / BASELINE.callToAppo - 1, suggestion: 'リスト品質とトーク品質の両面から改善' });
-
-        gaps.sort((a, b) => a.ratio - b.ratio);
-        const worst = gaps.length > 0 && gaps[0].ratio < -0.1 ? gaps[0] : null;
-
-        let cards = gaps.map((g, i) => {
-            const pct = (g.actual * 100).toFixed(1);
-            const basePct = (g.baseline * 100).toFixed(1);
-            const gapPct = (g.ratio * 100).toFixed(0);
-            const isWorst = i === 0 && g.ratio < -0.1;
-            let text = `${pct}%（基準: ${basePct}%、乖離: ${g.ratio >= 0 ? '+' : ''}${gapPct}%）`;
-            if (isWorst) text += ` → ${g.suggestion}`;
-            else if (g.ratio < -0.1) text += ` → ${g.suggestion}`;
-            return `<span class="${g.ratio < -0.1 ? 'diagnosis-tag alert' : 'diagnosis-tag ok'}">${g.label}: ${text}</span>`;
-        }).join('');
-
-        if (alertFlag) {
-            cards += `<span class="diagnosis-tag alert">収益性: 単価×架toア = ${profitCheck.toFixed(1)}（基準: 7以上）</span>`;
+            projDiagHtml += `
+                <div class="project-diagnosis-card has-alert">
+                    <div class="project-diagnosis-name">${name}</div>
+                    <div class="project-diagnosis-tags">${tags}</div>
+                </div>
+            `;
         }
-
-        projDiagHtml += `
-            <div class="project-diagnosis-card${worst ? ' has-alert' : ''}">
-                <div class="project-diagnosis-name">${name}</div>
-                <div class="project-diagnosis-tags">${cards}</div>
-            </div>
-        `;
     });
 
     document.getElementById('projectYieldTableBody').innerHTML = rows;
-    document.getElementById('projectDiagnosisGrid').innerHTML = projDiagHtml || '<div style="color:var(--text-light);font-size:0.85rem;">十分なデータがある案件がありません</div>';
+    document.getElementById('projectDiagnosisGrid').innerHTML = projDiagHtml || '<div style="color:var(--text-light);font-size:0.85rem;">全案件が基準値を満たしています</div>';
+}
+
+function toggleYieldDetail(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
 }
 
 // ==================== Tab 4: 案件管理 ====================
