@@ -1049,12 +1049,19 @@ function renderYield(perfData, filter) {
             : membersData;
 
     let yieldRows = '';
+    let totalExecCount = 0;
     entities.forEach(entity => {
         const ep = perfData.filter(d => d.member_name === entity.member_name);
         const c = sum(ep, 'call_count');
         const p = sum(ep, 'pr_count');
         const a = sum(ep, 'appointment_count');
         const amt = sum(ep, 'appointment_amount');
+
+        // 実施数
+        const memberExec = executionAppoData.filter(d => d.member_name === entity.member_name && d.status === '実施');
+        const e = memberExec.length;
+        totalExecCount += e;
+        const ate = a > 0 ? (e / a * 100).toFixed(1) : '-';
 
         const ctp = c > 0 ? (p / c * 100).toFixed(1) : '-';
         const pta = p > 0 ? (a / p * 100).toFixed(1) : '-';
@@ -1072,8 +1079,10 @@ function renderYield(perfData, filter) {
                 <td class="text-right number">${c.toLocaleString()}</td>
                 <td class="text-right number">${p.toLocaleString()}</td>
                 <td class="text-right number">${a}</td>
+                <td class="text-right number">${e}</td>
                 <td class="text-right number">${ctp}%</td>
                 <td class="text-right number">${pta}%</td>
+                <td class="text-right number">${ate}%</td>
                 <td class="text-right number">${cta}%</td>
                 <td class="text-right number">${profitIndex}${alertFlag ? ' <span style="color:var(--primary-red);font-weight:700;">&#9873;</span>' : ''}</td>
             </tr>
@@ -1081,14 +1090,17 @@ function renderYield(perfData, filter) {
     });
 
     // 合計行
+    const totalAte = totalAppo > 0 ? (totalExecCount / totalAppo * 100).toFixed(1) : '-';
     yieldRows += `
         <tr style="font-weight:700;background:var(--gray-100);">
             <td>合計</td>
             <td class="text-right number">${totalCalls.toLocaleString()}</td>
             <td class="text-right number">${totalPR.toLocaleString()}</td>
             <td class="text-right number">${totalAppo}</td>
+            <td class="text-right number">${totalExecCount}</td>
             <td class="text-right number">${callToPR.toFixed(1)}%</td>
             <td class="text-right number">${prToAppo.toFixed(1)}%</td>
+            <td class="text-right number">${totalAte}%</td>
             <td class="text-right number">${callToAppo.toFixed(2)}%</td>
             <td class="text-right number">-</td>
         </tr>
