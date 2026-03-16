@@ -608,6 +608,24 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
     const rescheduleRate = execCount > 0 ? (execRescheduleCount / execCount * 100).toFixed(1) : '-';
 
     document.getElementById('conversionRates').innerHTML = `
+        <div class="conversion-rates-row" style="margin-bottom:12px;">
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value">${totalCalls.toLocaleString()}</div>
+                <div class="conversion-rate-label">架電数</div>
+            </div>
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value">${totalPR.toLocaleString()}</div>
+                <div class="conversion-rate-label">PR数</div>
+            </div>
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value">${appoCount.toLocaleString()}</div>
+                <div class="conversion-rate-label">アポ数</div>
+            </div>
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value">${totalHours.toFixed(1)}h</div>
+                <div class="conversion-rate-label">稼働時間</div>
+            </div>
+        </div>
         <div class="conversion-rates-row">
             <div class="conversion-rate-card">
                 <div class="conversion-rate-value">${callToPR}%</div>
@@ -619,15 +637,15 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
             </div>
             <div class="conversion-rate-card">
                 <div class="conversion-rate-value" style="color:var(--primary-blue);">${executionRate}%</div>
-                <div class="conversion-rate-label">実施率</div>
+                <div class="conversion-rate-label">実施率（${execConfirmedCount}/${execCount}件）</div>
             </div>
             <div class="conversion-rate-card">
                 <div class="conversion-rate-value" style="color:${cancelRate !== '-' && parseFloat(cancelRate) > 15 ? 'var(--primary-red)' : 'var(--text-dark)'};">${cancelRate}%</div>
-                <div class="conversion-rate-label">キャンセル率</div>
+                <div class="conversion-rate-label">キャンセル率（${execCancelledCount}件）</div>
             </div>
             <div class="conversion-rate-card">
                 <div class="conversion-rate-value" style="color:${rescheduleRate !== '-' && parseFloat(rescheduleRate) > 15 ? '#8a7a00' : 'var(--text-dark)'};">${rescheduleRate}%</div>
-                <div class="conversion-rate-label">リスケ率</div>
+                <div class="conversion-rate-label">リスケ率（${execRescheduleCount}件）</div>
             </div>
         </div>
     `;
