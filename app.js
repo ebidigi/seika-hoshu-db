@@ -773,36 +773,80 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
 }
 
 function renderMemberGraphs(perfData) {
-    const metrics = [
-        { key: 'call_count', label: '架電数', color: 'var(--blue-200)' },
-        { key: 'pr_count', label: 'PR数', color: 'var(--cyan-200)' },
-        { key: 'appointment_count', label: 'アポ数', color: 'var(--yellow-200)' },
-        { key: 'call_hours', label: '稼働時間', color: 'var(--red-200)', suffix: 'h', decimals: 1 }
+    const PROJ_COLORS = [
+        '#86aaec', '#6dc6e5', '#ede07d', '#ef947a', '#a1d7ea',
+        '#c2d6f9', '#f4edb6', '#fecec0', '#b8d4f0', '#d4eaf7'
     ];
 
-    let html = '';
+    // 案件リスト（色割り当て用）
+    const projectNames = [...new Set(perfData.map(d => d.project_name).filter(Boolean))].sort();
+    const projColorMap = {};
+    projectNames.forEach((name, i) => { projColorMap[name] = PROJ_COLORS[i % PROJ_COLORS.length]; });
+
+    const metrics = [
+        { key: 'call_count', label: '架電数' },
+        { key: 'pr_count', label: 'PR数' },
+        { key: 'appointment_count', label: 'アポ数' },
+        { key: 'call_hours', label: '稼働時間', suffix: 'h', decimals: 1 }
+    ];
+
+    // 凡例
+    let legendHtml = '<div class="member-graph-legend">';
+    projectNames.forEach(name => {
+        legendHtml += `<span class="member-graph-legend-item"><span class="member-graph-legend-dot" style="background:${projColorMap[name]};"></span>${name}</span>`;
+    });
+    legendHtml += '</div>';
+
+    let html = legendHtml;
 
     metrics.forEach(metric => {
+        // メンバーごとに案件別の内訳を集計
         const memberValues = membersData.map(member => {
             const memberPerf = perfData.filter(d => d.member_name === member.member_name);
-            const value = sum(memberPerf, metric.key);
-            return { name: displayName(member.member_name), value };
-        }).sort((a, b) => b.value - a.value);
+            const total = metric.key === 'call_hours' ? memberPerf.reduce((s, d) => s + (d[metric.key] || 0), 0) : memberPerf.reduce((s, d) => s + (d[metric.key] || 0), 0);
+            const byProject = {};
+            memberPerf.forEach(d => {
+                const pn = d.project_name || '不明';
+                byProject[pn] = (byProject[pn] || 0) + (d[metric.key] || 0);
+            });
+            return { name: displayName(member.member_name), total, byProject };
+        }).sort((a, b) => b.total - a.total);
 
-        const maxValue = Math.max(...memberValues.map(m => m.value), 1);
+        const maxValue = Math.max(...memberValues.map(m => m.total), 1);
 
         html += `<div class="member-graph-section">
             <div class="member-graph-title">${metric.label}</div>
             <div class="member-graph-bars">`;
 
         memberValues.forEach(m => {
-            const pct = maxValue > 0 ? (m.value / maxValue * 100) : 0;
-            const displayVal = metric.decimals ? m.value.toFixed(metric.decimals) : m.value.toLocaleString();
+            const totalPct = maxValue > 0 ? (m.total / maxValue * 100) : 0;
+            const displayVal = metric.decimals ? m.total.toFixed(metric.decimals) : m.total.toLocaleString();
+
+            // 積み上げセグメント
+            let segments = '';
+            let tooltipParts = [];
+            projectNames.forEach(pn => {
+                const val = m.byProject[pn] || 0;
+                if (val <= 0) return;
+                const segPct = m.total > 0 ? (val / m.total * 100) : 0;
+                const segDisplay = metric.decimals ? val.toFixed(metric.decimals) : val.toLocaleString();
+                segments += `<div class="member-graph-segment" style="width:${segPct}%;background:${projColorMap[pn]};" title="${pn}: ${segDisplay}${metric.suffix || ''}"></div>`;
+                tooltipParts.push(`${pn}: ${segDisplay}`);
+            });
+            // 不明な案件
+            const unknownVal = m.byProject['不明'] || 0;
+            if (unknownVal > 0 && !projectNames.includes('不明')) {
+                const segPct = m.total > 0 ? (unknownVal / m.total * 100) : 0;
+                segments += `<div class="member-graph-segment" style="width:${segPct}%;background:var(--gray-300);" title="不明: ${unknownVal}"></div>`;
+            }
+
             html += `
                 <div class="member-graph-row">
                     <div class="member-graph-name">${m.name}</div>
                     <div class="member-graph-bar-wrap">
-                        <div class="member-graph-bar" style="width:${pct}%;background:${metric.color};"></div>
+                        <div class="member-graph-stacked" style="width:${totalPct}%;">
+                            ${segments}
+                        </div>
                     </div>
                     <div class="member-graph-value">${displayVal}${metric.suffix || ''}</div>
                 </div>`;

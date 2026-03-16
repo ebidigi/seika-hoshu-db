@@ -1560,6 +1560,43 @@ body {
     min-width: 2px;
 }
 
+.member-graph-stacked {
+    display: flex;
+    height: 100%;
+    border-radius: 4px;
+    overflow: hidden;
+    transition: width 0.4s ease;
+}
+
+.member-graph-segment {
+    height: 100%;
+    transition: width 0.3s ease;
+    cursor: pointer;
+}
+
+.member-graph-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-size: 0.7rem;
+    color: var(--text-light);
+}
+
+.member-graph-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.member-graph-legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
 .member-graph-value {
     width: 60px;
     font-family: 'Poppins', sans-serif;
