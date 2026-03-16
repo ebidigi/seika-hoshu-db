@@ -1574,6 +1574,22 @@ body {
     cursor: pointer;
 }
 
+.graph-tooltip {
+    display: none;
+    position: fixed;
+    background: var(--text-dark);
+    color: #fff;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    padding: 6px 12px;
+    border-radius: 8px;
+    pointer-events: none;
+    transform: translate(-50%, -100%);
+    z-index: 9999;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
 .member-graph-legend {
     display: flex;
     flex-wrap: wrap;

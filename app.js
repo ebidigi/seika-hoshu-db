@@ -824,20 +824,18 @@ function renderMemberGraphs(perfData) {
 
             // 積み上げセグメント
             let segments = '';
-            let tooltipParts = [];
             projectNames.forEach(pn => {
                 const val = m.byProject[pn] || 0;
                 if (val <= 0) return;
                 const segPct = m.total > 0 ? (val / m.total * 100) : 0;
                 const segDisplay = metric.decimals ? val.toFixed(metric.decimals) : val.toLocaleString();
-                segments += `<div class="member-graph-segment" style="width:${segPct}%;background:${projColorMap[pn]};" title="${pn}: ${segDisplay}${metric.suffix || ''}"></div>`;
-                tooltipParts.push(`${pn}: ${segDisplay}`);
+                segments += `<div class="member-graph-segment" style="width:${segPct}%;background:${projColorMap[pn]};" data-tip="${pn}: ${segDisplay}${metric.suffix || ''}"></div>`;
             });
             // 不明な案件
             const unknownVal = m.byProject['不明'] || 0;
             if (unknownVal > 0 && !projectNames.includes('不明')) {
                 const segPct = m.total > 0 ? (unknownVal / m.total * 100) : 0;
-                segments += `<div class="member-graph-segment" style="width:${segPct}%;background:var(--gray-300);" title="不明: ${unknownVal}"></div>`;
+                segments += `<div class="member-graph-segment" style="width:${segPct}%;background:var(--gray-300);" data-tip="不明: ${unknownVal}"></div>`;
             }
 
             html += `
@@ -856,6 +854,27 @@ function renderMemberGraphs(perfData) {
     });
 
     document.getElementById('memberGraphs').innerHTML = html;
+
+    // カスタムツールチップ
+    let tip = document.getElementById('graphTooltip');
+    if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'graphTooltip';
+        tip.className = 'graph-tooltip';
+        document.body.appendChild(tip);
+    }
+    document.querySelectorAll('.member-graph-segment[data-tip]').forEach(el => {
+        el.addEventListener('mouseenter', e => {
+            tip.textContent = el.dataset.tip;
+            tip.style.display = 'block';
+            const rect = el.getBoundingClientRect();
+            tip.style.left = (rect.left + rect.width / 2) + 'px';
+            tip.style.top = (rect.top - 8) + 'px';
+        });
+        el.addEventListener('mouseleave', () => {
+            tip.style.display = 'none';
+        });
+    });
 }
 
 // ==================== Tab 2: アポ確認管理 ====================
