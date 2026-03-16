@@ -636,7 +636,7 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
                 <div class="conversion-rate-label">PR→アポ率</div>
             </div>
             <div class="conversion-rate-card">
-                <div class="conversion-rate-value" style="color:var(--primary-blue);">${executionRate}%</div>
+                <div class="conversion-rate-value" style="color:${executionRate !== '-' && parseFloat(executionRate) < 80 ? 'var(--primary-red)' : 'var(--primary-blue)'};">${executionRate}%</div>
                 <div class="conversion-rate-label">実施率（${execConfirmedCount}/${execCount}件）</div>
             </div>
             <div class="conversion-rate-card">
