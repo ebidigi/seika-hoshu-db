@@ -987,11 +987,24 @@ function renderYield(perfData, filter) {
     const prToAppo = totalPR > 0 ? (totalAppo / totalPR * 100) : 0;
     const callToAppo = totalCalls > 0 ? (totalAppo / totalCalls * 100) : 0;
 
+    // 実施数（executionAppoDataから集計）
+    const filteredExec = filter.team !== 'all'
+        ? executionAppoData.filter(a => {
+            const tm = membersData.filter(m => m.team_name === filter.team).map(m => m.member_name);
+            return tm.includes(a.member_name);
+        })
+        : filter.member !== 'all'
+            ? executionAppoData.filter(a => a.member_name === filter.member)
+            : executionAppoData;
+    const execConfirmed = filteredExec.filter(a => a.status === '実施').length;
+    const appoToExec = totalAppo > 0 ? (execConfirmed / totalAppo * 100) : 0;
+
     // ファネル
     const maxHeight = 160;
     const callH = maxHeight;
     const prH = totalCalls > 0 ? Math.max(20, totalPR / totalCalls * maxHeight) : 20;
     const appoH = totalCalls > 0 ? Math.max(20, totalAppo / totalCalls * maxHeight) : 20;
+    const execH = totalCalls > 0 ? Math.max(20, execConfirmed / totalCalls * maxHeight) : 20;
 
     document.getElementById('funnelContainer').innerHTML = `
         <div class="funnel-stage">
@@ -1016,6 +1029,15 @@ function renderYield(perfData, filter) {
             <div class="funnel-bar" style="width:100px;height:${appoH}px;background:var(--yellow-100);"></div>
             <div class="funnel-value">${totalAppo.toLocaleString()}</div>
             <div class="funnel-label">アポ数</div>
+        </div>
+        <div style="text-align:center;">
+            <div class="funnel-arrow">→</div>
+            <div class="funnel-rate">${appoToExec.toFixed(1)}%</div>
+        </div>
+        <div class="funnel-stage">
+            <div class="funnel-bar" style="width:100px;height:${execH}px;background:var(--success-light);"></div>
+            <div class="funnel-value">${execConfirmed.toLocaleString()}</div>
+            <div class="funnel-label">実施数</div>
         </div>
     `;
 
