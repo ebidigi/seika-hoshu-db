@@ -1067,16 +1067,16 @@ function renderYield(perfData, filter) {
     const prToAppo = totalPR > 0 ? (totalAppo / totalPR * 100) : 0;
     const callToAppo = totalCalls > 0 ? (totalAppo / totalCalls * 100) : 0;
 
-    // 実施数（executionAppoDataから集計）
-    const filteredExec = filter.team !== 'all'
-        ? executionAppoData.filter(a => {
+    // 実施数（取得ベース: 当月取得アポのうち実施確定のもの）
+    const filteredAcqAppo = filter.team !== 'all'
+        ? appointmentsData.filter(a => {
             const tm = membersData.filter(m => m.team_name === filter.team).map(m => m.member_name);
             return tm.includes(a.member_name);
         })
         : filter.member !== 'all'
-            ? executionAppoData.filter(a => a.member_name === filter.member)
-            : executionAppoData;
-    const execConfirmed = filteredExec.filter(a => a.status === '実施').length;
+            ? appointmentsData.filter(a => a.member_name === filter.member)
+            : appointmentsData;
+    const execConfirmed = filteredAcqAppo.filter(a => a.status === '実施').length;
     const appoToExec = totalAppo > 0 ? (execConfirmed / totalAppo * 100) : 0;
 
     // ファネル
@@ -1143,8 +1143,8 @@ function renderYield(perfData, filter) {
         const p = sum(ep, 'pr_count');
         const a = sum(ep, 'appointment_count');
 
-        // 実施数
-        const memberExec = executionAppoData.filter(d => d.member_name === entity.member_name && d.status === '実施');
+        // 実施数（取得ベース: 当月取得アポのうち実施確定）
+        const memberExec = appointmentsData.filter(d => d.member_name === entity.member_name && d.status === '実施');
         const e = memberExec.length;
         totalExecCount += e;
         const ate = a > 0 ? (e / a * 100).toFixed(1) : '-';
