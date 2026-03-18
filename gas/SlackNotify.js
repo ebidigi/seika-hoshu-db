@@ -89,7 +89,7 @@ function sendSeikaSlackNotification() {
     // チーム別集計
     const teams = {
       '野口Team': ['野口', '中村た', '田中か', '辻森'],
-      '松居Team': ['松居', '山本', '美除'],
+      '松居Team': ['松居', '山本', '美除', '村上'],
       '坪井Team': ['坪井', '村松', '田中颯汰'],
       '宮城Team': ['宮城']
     };

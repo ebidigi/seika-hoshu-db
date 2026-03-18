@@ -352,7 +352,7 @@ function upsertAppointmentBatch(rows) {
  * 正規名: 野口, 中村た, 田中か, 辻森, 松居, 山本, 美除, 坪井, 村松, 田中颯汰, 宮城
  */
 function cleanupNonCanonicalNames() {
-  var canonicalNames = ['野口', '中村た', '田中か', '辻森', '松居', '山本', '美除', '坪井', '村松', '田中颯汰', '宮城'];
+  var canonicalNames = ['野口', '中村た', '田中か', '辻森', '松居', '山本', '美除', '村上', '坪井', '村松', '田中颯汰', '宮城'];
   var inClause = canonicalNames.map(function(n) { return "'" + n + "'"; }).join(',');
 
   // Step 1: 非正規名の行を取得
