@@ -952,10 +952,16 @@ function renderAppointments() {
     merged.sort((a, b) => (b.scheduled_date || '').localeCompare(a.scheduled_date || '') || (b.acquisition_date || '').localeCompare(a.acquisition_date || ''));
     const allData = merged;
 
-    // サマリーは常に当月全体で計算
+    // 今日までフィルタを適用してからサマリ計算
+    let summaryData = allData;
+    if (!appoShowAll) {
+        const today = formatDate(new Date());
+        summaryData = summaryData.filter(a => !a.scheduled_date || a.scheduled_date <= today);
+    }
+
     const statusCounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
     const statusAmounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
-    allData.forEach(a => {
+    summaryData.forEach(a => {
         if (statusCounts[a.status] !== undefined) {
             statusCounts[a.status]++;
             statusAmounts[a.status] += a.amount || 0;
@@ -972,7 +978,7 @@ function renderAppointments() {
     }
 
     // ステータスサマリ
-    const total = allData.length;
+    const total = summaryData.length;
     const executeRate = total > 0 ? (statusCounts['実施'] / total * 100).toFixed(1) : '0';
     const cancelRate = total > 0 ? (statusCounts['キャンセル'] / total * 100).toFixed(1) : '0';
     const rescheduleRate = total > 0 ? (statusCounts['リスケ'] / total * 100).toFixed(1) : '0';
@@ -1017,13 +1023,8 @@ function renderAppointments() {
         </div>
     `;
 
-    // テーブル用データ: 今日までフィルタ + ステータスフィルタ
-    let tableData = allData;
-    if (!appoShowAll) {
-        const today = formatDate(new Date());
-        tableData = tableData.filter(a => !a.scheduled_date || a.scheduled_date <= today);
-    }
-    let filtered = currentAppoFilter === 'all' ? tableData : tableData.filter(a => a.status === currentAppoFilter);
+    // テーブル用データ: summaryData（今日までフィルタ済み） + ステータスフィルタ
+    let filtered = currentAppoFilter === 'all' ? summaryData : summaryData.filter(a => a.status === currentAppoFilter);
 
     // 検索フィルタ
     const searchInput = document.getElementById('appoSearchInput');
