@@ -554,14 +554,14 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
     const acqBarWidth = Math.min(acqRate, 100);
     const acqBarColor = acqRate >= standardProgress ? '#86aaec' : acqRate >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
 
-    // 実施目標 進捗バー
-    const execRate = executionTarget > 0 ? Math.round(execExpected / executionTarget * 1000) / 10 : 0;
-    const execBarWidth = Math.min(execRate, 100);
-    const execBarColor = execRate >= standardProgress ? '#86aaec' : execRate >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+    // 実施確定 進捗バー（実施目標 vs 確定金額）
+    const confirmedRate = executionTarget > 0 ? Math.round(execConfirmed / executionTarget * 1000) / 10 : 0;
+    const confirmedBarWidth = Math.min(confirmedRate, 100);
+    const confirmedBarColor = confirmedRate >= standardProgress ? '#86aaec' : confirmedRate >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
 
     document.getElementById('salesTargetCard').innerHTML = `
         <div class="sales-target-card" style="grid-template-columns:1fr;">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;">
                 <div>
                     <div class="sales-target-label">取得金額（目標: ¥${monthlyTarget.toLocaleString()}）</div>
                     <div class="sales-target-amount">¥${acquisitionAmount.toLocaleString()}</div>
@@ -577,15 +577,20 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
                     </div>
                 </div>
                 <div>
-                    <div class="sales-target-label">実施金額（目標: ¥${executionTarget.toLocaleString()}）</div>
+                    <div class="sales-target-label">実施見込</div>
                     <div class="sales-target-amount">¥${execExpected.toLocaleString()}</div>
+                    <div style="font-size:0.75rem;color:var(--text-light);margin-top:8px;">未確認 ¥${execUnconfirmed.toLocaleString()} + 確定 ¥${execConfirmed.toLocaleString()}</div>
+                </div>
+                <div>
+                    <div class="sales-target-label">実施確定（目標: ¥${executionTarget.toLocaleString()}）</div>
+                    <div class="sales-target-amount" style="color:var(--primary-blue);">¥${execConfirmed.toLocaleString()}</div>
                     <div class="sales-target-bar-wrap" style="margin-top:8px;">
                         <div class="sales-target-bar-info">
-                            <span>見込率 ${execRate}%</span>
-                            <span>確定 ¥${execConfirmed.toLocaleString()}</span>
+                            <span>達成率 ${confirmedRate}%</span>
+                            <span>残 ¥${Math.max(0, executionTarget - execConfirmed).toLocaleString()}</span>
                         </div>
                         <div class="sales-target-bar">
-                            <div class="sales-target-bar-fill" style="width:${execBarWidth}%;background:${execBarColor};"></div>
+                            <div class="sales-target-bar-fill" style="width:${confirmedBarWidth}%;background:${confirmedBarColor};"></div>
                             <div class="sales-target-bar-line" style="left:${Math.min(standardProgress, 100)}%;"></div>
                         </div>
                     </div>
@@ -692,14 +697,16 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
         // 取得金額（当月取得アポ）
         const acqAmount = teamAppo.reduce((s, a) => s + (a.amount || 0), 0);
 
-        // 実施金額（当月実施予定、前月取得含む）
-        const execAmount = teamExec.filter(a => a.status !== 'キャンセル' && a.status !== 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
+        // 実施見込（キャンセル・リスケ除く）
+        const execForecast = teamExec.filter(a => a.status !== 'キャンセル' && a.status !== 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
+        // 実施確定（ステータス=実施のみ）
+        const execConfirmed = teamExec.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
 
         const teamTarget = getTarget('team', teamName, ym);
         const target = teamTarget ? teamTarget.appointment_amount_target : 0;
         const execTarget = teamTarget ? (teamTarget.execution_target || target) : 0;
         const acqRate = target > 0 ? Math.round(acqAmount / target * 1000) / 10 : 0;
-        const execRate = execTarget > 0 ? Math.round(execAmount / execTarget * 1000) / 10 : 0;
+        const confirmedRate = execTarget > 0 ? Math.round(execConfirmed / execTarget * 1000) / 10 : 0;
         const barColor = acqRate >= standardProgress ? 'var(--success)' : acqRate >= standardProgress * 0.8 ? 'var(--warning)' : 'var(--danger)';
 
         html += `
@@ -708,16 +715,20 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
                     <span class="team-name">${teamName}</span>
                     <span class="team-progress" style="color:${barColor};">${acqRate}%</span>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
                     <div>
                         <div style="font-size:0.7rem;color:var(--text-light);">取得</div>
-                        <div class="number" style="font-size:0.95rem;font-weight:600;">¥${acqAmount.toLocaleString()}</div>
-                        <div style="font-size:0.65rem;color:var(--text-light);">${target > 0 ? '目標 ¥' + (target / 10000).toFixed(0) + '万' : ''}</div>
+                        <div class="number" style="font-size:0.9rem;font-weight:600;">¥${acqAmount.toLocaleString()}</div>
+                        <div style="font-size:0.6rem;color:var(--text-light);">${target > 0 ? '目標 ¥' + (target / 10000).toFixed(0) + '万' : ''}</div>
                     </div>
                     <div>
                         <div style="font-size:0.7rem;color:var(--text-light);">実施見込</div>
-                        <div class="number" style="font-size:0.95rem;font-weight:600;">¥${execAmount.toLocaleString()}</div>
-                        <div style="font-size:0.65rem;color:var(--text-light);">${execTarget > 0 ? '目標 ¥' + (execTarget / 10000).toFixed(0) + '万' : ''}</div>
+                        <div class="number" style="font-size:0.9rem;font-weight:600;">¥${execForecast.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.7rem;color:var(--text-light);">実施確定</div>
+                        <div class="number" style="font-size:0.9rem;font-weight:600;color:var(--primary-blue);">¥${execConfirmed.toLocaleString()}</div>
+                        <div style="font-size:0.6rem;color:var(--text-light);">${execTarget > 0 ? '目標 ¥' + (execTarget / 10000).toFixed(0) + '万' : ''}</div>
                     </div>
                 </div>
                 <div class="progress-bar">
@@ -741,16 +752,17 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
         const acqAmount = memberAppo.reduce((s, a) => s + (a.amount || 0), 0);
 
         const memberExec = execAppoData.filter(d => d.member_name === member.member_name);
-        const execAmount = memberExec.filter(a => a.status !== 'キャンセル' && a.status !== 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
+        const execForecast = memberExec.filter(a => a.status !== 'キャンセル' && a.status !== 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
+        const execConfirmed = memberExec.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
 
         const memberTarget = getTarget('member', member.member_name, ym);
         const acqTarget = memberTarget ? memberTarget.appointment_amount_target : 0;
         const execTarget = memberTarget ? (memberTarget.execution_target || acqTarget) : 0;
         const acqRate = acqTarget > 0 ? Math.round(acqAmount / acqTarget * 1000) / 10 : 0;
-        const execRate = execTarget > 0 ? Math.round(execAmount / execTarget * 1000) / 10 : 0;
+        const confirmedRate = execTarget > 0 ? Math.round(execConfirmed / execTarget * 1000) / 10 : 0;
 
         const acqBarColor = acqRate >= standardProgress ? 'var(--success)' : acqRate >= standardProgress * 0.8 ? 'var(--warning)' : 'var(--danger)';
-        const execBarColor = execRate >= standardProgress ? 'var(--success)' : execRate >= standardProgress * 0.8 ? 'var(--warning)' : 'var(--danger)';
+        const confirmedBarColor = confirmedRate >= standardProgress ? 'var(--success)' : confirmedRate >= standardProgress * 0.8 ? 'var(--warning)' : 'var(--danger)';
 
         html += `
             <div class="member-card">
@@ -758,27 +770,32 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
                     <span class="member-name">${displayName(member.member_name)}</span>
                     <span class="member-team-badge">${member.team_name}</span>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:4px;">
                     <div>
                         <div style="font-size:0.7rem;color:var(--text-light);">取得</div>
-                        <div style="font-size:1rem;font-weight:700;font-family:'Poppins',sans-serif;">¥${acqAmount.toLocaleString()}</div>
+                        <div style="font-size:0.95rem;font-weight:700;font-family:'Poppins',sans-serif;">¥${acqAmount.toLocaleString()}</div>
                         ${acqTarget > 0 ? `
                         <div class="progress-bar" style="margin-top:4px;">
                             <div class="progress-bar-fill" style="width:${Math.min(acqRate, 100)}%;background:${acqBarColor};"></div>
                             <div class="progress-bar-line" style="left:${Math.min(standardProgress || 0, 100)}%;"></div>
                         </div>
-                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(acqTarget / 10000).toFixed(0)}万 | ${acqRate}%</div>
+                        <div style="font-size:0.6rem;color:var(--text-light);">目標 ¥${(acqTarget / 10000).toFixed(0)}万 | ${acqRate}%</div>
                         ` : ''}
                     </div>
                     <div>
                         <div style="font-size:0.7rem;color:var(--text-light);">実施見込</div>
-                        <div style="font-size:1rem;font-weight:700;font-family:'Poppins',sans-serif;">¥${execAmount.toLocaleString()}</div>
+                        <div style="font-size:0.95rem;font-weight:700;font-family:'Poppins',sans-serif;color:var(--text-dark);">¥${execForecast.toLocaleString()}</div>
+                        <div style="font-size:0.6rem;color:var(--text-light);margin-top:4px;">未確認+実施の合計</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.7rem;color:var(--text-light);">実施確定</div>
+                        <div style="font-size:0.95rem;font-weight:700;font-family:'Poppins',sans-serif;color:var(--primary-blue);">¥${execConfirmed.toLocaleString()}</div>
                         ${execTarget > 0 ? `
                         <div class="progress-bar" style="margin-top:4px;">
-                            <div class="progress-bar-fill" style="width:${Math.min(execRate, 100)}%;background:${execBarColor};"></div>
+                            <div class="progress-bar-fill" style="width:${Math.min(confirmedRate, 100)}%;background:${confirmedBarColor};"></div>
                             <div class="progress-bar-line" style="left:${Math.min(standardProgress || 0, 100)}%;"></div>
                         </div>
-                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(execTarget / 10000).toFixed(0)}万 | ${execRate}%</div>
+                        <div style="font-size:0.6rem;color:var(--text-light);">目標 ¥${(execTarget / 10000).toFixed(0)}万 | ${confirmedRate}%</div>
                         ` : ''}
                     </div>
                 </div>
