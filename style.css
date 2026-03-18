@@ -969,6 +969,58 @@ body {
     font-weight: 600;
 }
 
+.editable-field {
+    cursor: pointer;
+    border-bottom: 1px dashed var(--border-color);
+    transition: background 0.2s;
+}
+.editable-field:hover {
+    background: var(--blue-50);
+    border-radius: 4px;
+}
+
+.project-cap-section { margin-top: 12px; }
+.project-cap-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.project-cap-edit {
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 2px 6px;
+}
+.project-cap-bar-wrap { margin-bottom: 6px; }
+.project-cap-bar {
+    height: 6px;
+    background: var(--border-color);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.project-cap-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s;
+}
+.project-cap-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+}
+.project-cap-actual {
+    font-weight: 600;
+    font-family: 'Poppins', sans-serif;
+}
+.project-cap-remaining {
+    color: var(--text-light);
+}
+.project-cap-remaining.over {
+    color: var(--primary-red);
+    font-weight: 600;
+}
+
 /* ========== チャート ========== */
 .chart-section {
     background: var(--bg-white);
@@ -1178,6 +1230,12 @@ body {
 
 .save-btn:hover { background: #0c3d93; }
 
+.save-btn.saved {
+    background: #16a34a;
+    pointer-events: none;
+    transition: background 0.3s;
+}
+
 .settings-message {
     padding: 10px 16px;
     border-radius: 8px;
@@ -1196,6 +1254,29 @@ body {
     display: block;
     background: var(--red-50);
     color: var(--primary-red);
+}
+
+/* トースト通知 */
+.toast-notification {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-100px);
+    background: #16a34a;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 10000;
+    transition: transform 0.4s ease;
+}
+.toast-notification.show {
+    transform: translateX(-50%) translateY(0);
+}
+.toast-notification.error {
+    background: var(--primary-red);
 }
 
 /* ========== エラー ========== */

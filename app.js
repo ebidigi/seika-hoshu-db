@@ -137,6 +137,21 @@ function deduplicateAppointments(appoArray) {
     return Array.from(seen.values());
 }
 
+function deduplicatePerformance(perfArray) {
+    const seen = new Map();
+    for (const d of perfArray) {
+        const key = `${d.member_name}|${d.project_name}|${d.input_date}`;
+        if (!seen.has(key)) {
+            seen.set(key, d);
+        }
+        // 同じキーが複数ある場合、updated_atが新しい方を採用
+        else if (d.updated_at > seen.get(key).updated_at) {
+            seen.set(key, d);
+        }
+    }
+    return Array.from(seen.values());
+}
+
 // ==================== データ読み込み ====================
 async function loadAllData() {
     showLoading();
@@ -219,6 +234,9 @@ async function loadMonthData() {
     // 同一人物の重複アポを除去（member_name + project_name + acquisition_date + customer_name）
     appointmentsData = deduplicateAppointments(appointmentsData);
     executionAppoData = deduplicateAppointments(executionAppoData);
+
+    // 実績の重複排除（正規化後に同一 member_name + project_name + input_date が複数存在する場合）
+    performanceData = deduplicatePerformance(performanceData);
 
     // appointment_amountが0の場合、案件マスタの単価×アポ数で補完
     const projectPriceMap = {};
@@ -902,10 +920,16 @@ function renderAppointments() {
     }
 
     // ステータスサマリ
+    const total = allData.length;
+    const executeRate = total > 0 ? (statusCounts['実施'] / total * 100).toFixed(1) : '0';
+    const cancelRate = total > 0 ? (statusCounts['キャンセル'] / total * 100).toFixed(1) : '0';
+    const rescheduleRate = total > 0 ? (statusCounts['リスケ'] / total * 100).toFixed(1) : '0';
+    const unconfirmedRate = total > 0 ? (statusCounts['未確認'] / total * 100).toFixed(1) : '0';
+
     document.getElementById('appo-status-summary').innerHTML = `
-        <div class="rate-grid" style="margin-bottom:20px;">
+        <div class="rate-grid" style="margin-bottom:12px;">
             <div class="rate-card">
-                <div class="rate-value" style="color:var(--text-dark);">${allData.length}</div>
+                <div class="rate-value" style="color:var(--text-dark);">${total}</div>
                 <div class="rate-label">総アポ数</div>
             </div>
             <div class="rate-card">
@@ -919,6 +943,24 @@ function renderAppointments() {
             <div class="rate-card">
                 <div class="rate-value" style="color:var(--primary-red);">${statusCounts['キャンセル']}</div>
                 <div class="rate-label">キャンセル</div>
+            </div>
+        </div>
+        <div class="rate-grid" style="margin-bottom:20px;">
+            <div class="rate-card">
+                <div class="rate-value" style="color:${parseFloat(executeRate) < 80 ? 'var(--primary-red)' : 'var(--primary-blue)'}">${executeRate}%</div>
+                <div class="rate-label">実施率</div>
+            </div>
+            <div class="rate-card">
+                <div class="rate-value" style="color:var(--primary-red);">${cancelRate}%</div>
+                <div class="rate-label">キャンセル率</div>
+            </div>
+            <div class="rate-card">
+                <div class="rate-value" style="color:#8a7a00;">${rescheduleRate}%</div>
+                <div class="rate-label">リスケ率</div>
+            </div>
+            <div class="rate-card">
+                <div class="rate-value" style="color:var(--text-light);">${unconfirmedRate}%</div>
+                <div class="rate-label">未確認率</div>
             </div>
         </div>
     `;
@@ -960,31 +1002,6 @@ function renderAppointments() {
         `;
     }).join('');
 
-    // 確認率サマリ
-    const total = allData.length;
-    const cancelRate = total > 0 ? (statusCounts['キャンセル'] / total * 100).toFixed(1) : '0';
-    const rescheduleRate = total > 0 ? (statusCounts['リスケ'] / total * 100).toFixed(1) : '0';
-    const executeRate = total > 0 ? (statusCounts['実施'] / total * 100).toFixed(1) : '0';
-    const nonExecuteRate = total > 0 ? ((statusCounts['リスケ'] + statusCounts['キャンセル']) / total * 100).toFixed(1) : '0';
-
-    document.getElementById('appoRateGrid').innerHTML = `
-        <div class="rate-card">
-            <div class="rate-value" style="color:var(--primary-blue);">${executeRate}%</div>
-            <div class="rate-label">実施率</div>
-        </div>
-        <div class="rate-card">
-            <div class="rate-value" style="color:var(--primary-red);">${cancelRate}%</div>
-            <div class="rate-label">キャンセル率</div>
-        </div>
-        <div class="rate-card">
-            <div class="rate-value" style="color:#8a7a00;">${rescheduleRate}%</div>
-            <div class="rate-label">リスケ率</div>
-        </div>
-        <div class="rate-card">
-            <div class="rate-value" style="color:var(--text-dark);">${nonExecuteRate}%</div>
-            <div class="rate-label">非実施率(リスケ+取消)</div>
-        </div>
-    `;
 }
 
 function filterAppoStatus(status) {
@@ -1396,11 +1413,28 @@ function toggleYieldDetail(rowId) {
 
 // ==================== Tab 4: 案件管理 ====================
 function renderProjects() {
+    // 案件ごとの当月アポ件数を集計
+    const projectAppoCount = {};
+    appointmentsData.forEach(a => {
+        const pn = a.project_name;
+        if (!pn) return;
+        projectAppoCount[pn] = (projectAppoCount[pn] || 0) + 1;
+    });
+
     // 案件カード
     let html = '';
     projectsData.forEach(p => {
+        const pid = encodeURIComponent(p.project_name);
+        const cap = p.monthly_cap_count || 0;
+        const actual = projectAppoCount[p.project_name] || 0;
+        const remaining = cap > 0 ? cap - actual : null;
+        const capRate = cap > 0 ? Math.round(actual / cap * 100) : null;
+        const barWidth = cap > 0 ? Math.min(actual / cap * 100, 100) : 0;
+        const isOver = cap > 0 && actual >= cap;
+        const barColor = isOver ? 'var(--primary-red)' : capRate > 80 ? '#ede07d' : 'var(--primary-blue)';
+
         html += `
-            <div class="project-card">
+            <div class="project-card" id="pcard-${pid}">
                 <div class="project-card-header">
                     <div>
                         <div class="project-name">${p.project_name}</div>
@@ -1408,15 +1442,26 @@ function renderProjects() {
                     </div>
                     <span class="kpi-badge good">${p.status}</span>
                 </div>
-                <div class="project-meta">
-                    <div class="project-meta-item">
-                        <div class="project-meta-label">アポ単価</div>
-                        <div class="project-meta-value">¥${(p.unit_price || 0).toLocaleString()}</div>
+                <div class="project-cap-section">
+                    <div class="project-cap-header">
+                        <span class="project-meta-label">月次キャップ</span>
+                        <span class="project-cap-edit editable-field" onclick="editProjectField(this, '${escapeHtml(p.project_name)}', 'monthly_cap_count', ${cap})">${cap > 0 ? cap + '件' : '未設定'}</span>
                     </div>
-                    <div class="project-meta-item">
-                        <div class="project-meta-label">月次キャップ</div>
-                        <div class="project-meta-value">${p.monthly_cap_count ? p.monthly_cap_count + '件' : '-'}</div>
-                    </div>
+                    ${cap > 0 ? `
+                        <div class="project-cap-bar-wrap">
+                            <div class="project-cap-bar">
+                                <div class="project-cap-bar-fill" style="width:${barWidth}%;background:${barColor};"></div>
+                            </div>
+                        </div>
+                        <div class="project-cap-stats">
+                            <span class="project-cap-actual">${actual}件<span style="color:var(--text-light);font-weight:400;"> / ${cap}件</span></span>
+                            <span class="project-cap-remaining ${isOver ? 'over' : ''}">${isOver ? 'キャップ超過' : '残り' + remaining + '件'}</span>
+                        </div>
+                    ` : `
+                        <div class="project-cap-stats">
+                            <span class="project-cap-actual">${actual}件</span>
+                        </div>
+                    `}
                 </div>
                 ${p.call_list_url ? `<div style="margin-top:12px;"><a href="${escapeHtml(p.call_list_url)}" target="_blank" style="color:var(--text-muted);font-size:0.8rem;">架電リスト →</a></div>` : ''}
             </div>
@@ -1428,6 +1473,42 @@ function renderProjects() {
     renderCapTable();
     // アサイン管理テーブル
     renderAssignments();
+}
+
+function editProjectField(el, projectName, field, currentValue) {
+    if (el.querySelector('input')) return; // already editing
+    const display = el.innerHTML;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.value = currentValue || '';
+    input.style.cssText = 'width:80px;padding:4px 6px;border:1px solid var(--primary-blue);border-radius:4px;font-size:0.85rem;text-align:right;';
+    el.innerHTML = '';
+    el.appendChild(input);
+    input.focus();
+    input.select();
+
+    const save = async () => {
+        const newVal = parseInt(input.value) || 0;
+        try {
+            await executeTurso(
+                `UPDATE projects SET ${field} = ?, updated_at = datetime('now') WHERE project_name = ?`,
+                [newVal, projectName]
+            );
+            const proj = projectsData.find(p => p.project_name === projectName);
+            if (proj) proj[field] = newVal;
+            showToast(`${projectName}のキャップを更新しました`);
+            renderProjects();
+        } catch (e) {
+            el.innerHTML = display;
+            showToast('更新に失敗しました: ' + e.message, true);
+        }
+    };
+
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { el.innerHTML = display; }
+    });
 }
 
 async function renderCapTable() {
@@ -2005,6 +2086,31 @@ function renderSettings() {
     document.getElementById('memberManageBody').innerHTML = memberRows;
 }
 
+function showToast(message, isError = false) {
+    const existing = document.querySelector('.toast-notification');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification' + (isError ? ' error' : '');
+    toast.textContent = isError ? message : '\u2714 ' + message;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('show'));
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 400);
+    }, 3000);
+}
+
+function setSaveBtnState(btn, success) {
+    if (!btn) return;
+    const original = btn.textContent;
+    btn.textContent = success ? '\u2714 保存しました' : '\u2716 失敗';
+    btn.classList.add('saved');
+    setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove('saved');
+    }, 2000);
+}
+
 async function saveTargets() {
     const ym = document.getElementById('filterMonth').value;
     const msg = document.getElementById('targetMessage');
@@ -2037,11 +2143,15 @@ async function saveTargets() {
         msg.style.display = 'block';
         setTimeout(() => { msg.style.display = 'none'; }, 3000);
 
+        showToast('目標を保存しました');
+        document.querySelectorAll('.save-btn[onclick="saveTargets()"]').forEach(b => setSaveBtnState(b, true));
+
         renderAll();
     } catch (error) {
         msg.className = 'settings-message error';
         msg.textContent = '保存に失敗しました: ' + error.message;
         msg.style.display = 'block';
+        showToast('保存に失敗しました: ' + error.message, true);
     }
 }
 
@@ -2092,10 +2202,14 @@ async function saveDailyTarget() {
         msg.textContent = '日次目標を保存しました。';
         msg.style.display = 'block';
         setTimeout(() => { msg.style.display = 'none'; }, 3000);
+
+        showToast('日次目標を保存しました');
+        setSaveBtnState(document.querySelector('.save-btn[onclick="saveDailyTarget()"]'), true);
     } catch (error) {
         msg.className = 'settings-message error';
         msg.textContent = '保存に失敗しました: ' + error.message;
         msg.style.display = 'block';
+        showToast('保存に失敗しました: ' + error.message, true);
     }
 }
 
@@ -2118,10 +2232,14 @@ async function saveRateSettings() {
         msg.textContent = 'レート設定を保存しました。';
         msg.style.display = 'block';
         setTimeout(() => { msg.style.display = 'none'; }, 3000);
+
+        showToast('レート設定を保存しました');
+        setSaveBtnState(document.querySelector('.save-btn[onclick="saveRateSettings()"]'), true);
     } catch (error) {
         msg.className = 'settings-message error';
         msg.textContent = '保存に失敗しました: ' + error.message;
         msg.style.display = 'block';
+        showToast('保存に失敗しました: ' + error.message, true);
     }
 }
 

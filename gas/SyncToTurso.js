@@ -355,29 +355,82 @@ function cleanupNonCanonicalNames() {
   var canonicalNames = ['野口', '中村た', '田中か', '辻森', '松居', '山本', '美除', '坪井', '村松', '田中颯汰', '宮城'];
   var inClause = canonicalNames.map(function(n) { return "'" + n + "'"; }).join(',');
 
-  var requests = [
-    {
+  // Step 1: 非正規名の行を取得
+  var checkResult;
+  try {
+    checkResult = executeTursoPipeline([{
       type: 'execute',
-      stmt: { sql: "DELETE FROM appointments WHERE member_name NOT IN (" + inClause + ")" }
-    },
-    {
-      type: 'execute',
-      stmt: { sql: "DELETE FROM performance_rawdata WHERE member_name NOT IN (" + inClause + ")" }
+      stmt: { sql: "SELECT DISTINCT member_name FROM performance_rawdata WHERE member_name NOT IN (" + inClause + ")" }
+    }]);
+  } catch (e) {
+    Logger.log('クリーンアップチェックエラー: ' + e.message);
+    return;
+  }
+
+  var nonCanonRows = checkResult.results && checkResult.results[0] && checkResult.results[0].type === 'ok'
+    ? (checkResult.results[0].response.result.rows || [])
+    : [];
+
+  if (nonCanonRows.length === 0) return;
+
+  var requests = [];
+
+  // Step 2: 非正規名を正規名に変換して更新（重複がある場合は非正規名側を削除）
+  for (var i = 0; i < nonCanonRows.length; i++) {
+    var rawName = nonCanonRows[i][0];
+    var canonical = normalizeMemberName(rawName);
+    if (!canonical || canonical === rawName || !canonicalNames.includes(canonical)) {
+      // 正規化できない場合は削除
+      requests.push({
+        type: 'execute',
+        stmt: { sql: "DELETE FROM performance_rawdata WHERE member_name = ?", args: [toTursoArg(rawName)] }
+      });
+      requests.push({
+        type: 'execute',
+        stmt: { sql: "DELETE FROM appointments WHERE member_name = ?", args: [toTursoArg(rawName)] }
+      });
+      continue;
     }
-  ];
+
+    // 重複行（正規名と同じproject+date）を削除
+    requests.push({
+      type: 'execute',
+      stmt: {
+        sql: "DELETE FROM performance_rawdata WHERE member_name = ? AND EXISTS (SELECT 1 FROM performance_rawdata b WHERE b.member_name = ? AND b.project_name = performance_rawdata.project_name AND b.input_date = performance_rawdata.input_date)",
+        args: [toTursoArg(rawName), toTursoArg(canonical)]
+      }
+    });
+    requests.push({
+      type: 'execute',
+      stmt: {
+        sql: "DELETE FROM appointments WHERE member_name = ? AND EXISTS (SELECT 1 FROM appointments b WHERE b.member_name = ? AND b.project_name = appointments.project_name AND b.acquisition_date = appointments.acquisition_date AND b.customer_name = appointments.customer_name)",
+        args: [toTursoArg(rawName), toTursoArg(canonical)]
+      }
+    });
+
+    // 重複のない行は正規名に更新
+    requests.push({
+      type: 'execute',
+      stmt: { sql: "UPDATE performance_rawdata SET member_name = ? WHERE member_name = ?", args: [toTursoArg(canonical), toTursoArg(rawName)] }
+    });
+    requests.push({
+      type: 'execute',
+      stmt: { sql: "UPDATE appointments SET member_name = ? WHERE member_name = ?", args: [toTursoArg(canonical), toTursoArg(rawName)] }
+    });
+  }
+
+  if (requests.length === 0) return;
 
   try {
     var result = executeTursoPipeline(requests);
-    var appoDeleted = 0;
-    var perfDeleted = 0;
-    if (result.results && result.results[0] && result.results[0].type === 'ok') {
-      appoDeleted = result.results[0].response.result.affected_row_count || 0;
+    var totalAffected = 0;
+    for (var j = 0; j < result.results.length; j++) {
+      if (result.results[j].type === 'ok') {
+        totalAffected += result.results[j].response.result.affected_row_count || 0;
+      }
     }
-    if (result.results && result.results[1] && result.results[1].type === 'ok') {
-      perfDeleted = result.results[1].response.result.affected_row_count || 0;
-    }
-    if (appoDeleted > 0 || perfDeleted > 0) {
-      Logger.log('非正規名クリーンアップ: appointments ' + appoDeleted + '行, performance ' + perfDeleted + '行 削除');
+    if (totalAffected > 0) {
+      Logger.log('非正規名クリーンアップ: ' + totalAffected + '行処理 (' + nonCanonRows.length + '名分)');
     }
   } catch (e) {
     Logger.log('クリーンアップエラー: ' + e.message);

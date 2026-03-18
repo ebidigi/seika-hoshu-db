@@ -58,7 +58,8 @@ function setupTriggersSeika() {
         name === 'sendSeikaSlackNotification12' ||
         name === 'sendSeikaSlackNotification15' ||
         name === 'sendSeikaSlackNotification18' ||
-        name === 'sendSeikaSlackNotification20') {
+        name === 'sendSeikaSlackNotification20' ||
+        name === 'syncSlackAppoStatusToTurso') {
       ScriptApp.deleteTrigger(trigger);
     }
   });
@@ -105,6 +106,12 @@ function setupTriggersSeika() {
     .atHour(20)
     .nearMinute(0)
     .everyDays(1)
+    .create();
+
+  // TAAAN Slack監視: 15分毎
+  ScriptApp.newTrigger('syncSlackAppoStatusToTurso')
+    .timeBased()
+    .everyMinutes(15)
     .create();
 
   Logger.log('All triggers set up successfully');
