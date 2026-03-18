@@ -1702,17 +1702,13 @@ function renderAssignments() {
         a._hasAlert = a._calls >= 100 && a._alertScore < 7;
     });
 
-    const rankColors = { 'A': '#ef947a', 'B': '#ede07d', 'C': '#86aaec', 'D': '#b1b4ba', '立ち上げ': '#a1d7ea' };
-
     let rows = '';
     filtered.forEach(a => {
-        const rankColor = rankColors[a.rank] || '#b1b4ba';
         const progressColor = a._progress >= 100 ? 'var(--success)' : a._progress >= 70 ? '#ede07d' : '#ef947a';
         const progressWidth = Math.min(a._progress, 100);
 
         rows += `
             <tr>
-                <td><span class="rank-badge" style="background:${rankColor};">${a.rank || '-'}</span></td>
                 <td>${a.project_name}</td>
                 <td><span class="type-badge ${a.project_type === '成果報酬' ? 'seika' : 'kadou'}">${a.project_type || '-'}</span></td>
                 <td>${a.pm_name || '-'}</td>
@@ -1773,7 +1769,6 @@ function openAssignmentForm(editId) {
             document.getElementById('assignmentFormTitle').textContent = 'アサイン編集';
             memberSelect.value = a.member_name;
             projectSelect.value = a.project_name;
-            document.getElementById('asgFormRank').value = a.rank || 'C';
             document.getElementById('asgFormType').value = a.project_type || '成果報酬';
             document.getElementById('asgFormPM').value = a.pm_name || '';
             document.getElementById('asgFormCapCount').value = a.cap_count || '';
@@ -1783,7 +1778,6 @@ function openAssignmentForm(editId) {
         }
     } else {
         document.getElementById('assignmentFormTitle').textContent = '新規アサイン追加';
-        document.getElementById('asgFormRank').value = 'C';
         document.getElementById('asgFormType').value = '成果報酬';
         document.getElementById('asgFormPM').value = '';
         document.getElementById('asgFormCapCount').value = '';
@@ -1802,7 +1796,7 @@ async function submitAssignmentForm() {
     const memberName = document.getElementById('asgFormMember').value;
     const projectName = document.getElementById('asgFormProject').value;
     const ym = document.getElementById('filterMonth').value;
-    const rank = document.getElementById('asgFormRank').value;
+    const rank = null;
     const projectType = document.getElementById('asgFormType').value;
     const pmName = document.getElementById('asgFormPM').value || null;
     const capCount = parseInt(document.getElementById('asgFormCapCount').value) || 0;
