@@ -715,22 +715,19 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
                     <span class="team-name">${teamName}</span>
                     <span class="team-progress" style="color:${barColor};">${acqRate}%</span>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
                     <div>
                         <div style="font-size:0.7rem;color:var(--text-light);">取得</div>
-                        <div class="number" style="font-size:0.9rem;font-weight:600;">¥${acqAmount.toLocaleString()}</div>
-                        <div style="font-size:0.6rem;color:var(--text-light);">${target > 0 ? '目標 ¥' + (target / 10000).toFixed(0) + '万' : ''}</div>
-                    </div>
-                    <div>
-                        <div style="font-size:0.7rem;color:var(--text-light);">実施見込</div>
-                        <div class="number" style="font-size:0.9rem;font-weight:600;">¥${execForecast.toLocaleString()}</div>
+                        <div class="number" style="font-size:0.95rem;font-weight:600;">¥${acqAmount.toLocaleString()}</div>
+                        <div style="font-size:0.6rem;color:var(--text-light);">${target > 0 ? '目標 ¥' + (target / 10000).toFixed(0) + '万 | ' + acqRate + '%' : ''}</div>
                     </div>
                     <div>
                         <div style="font-size:0.7rem;color:var(--text-light);">実施確定</div>
-                        <div class="number" style="font-size:0.9rem;font-weight:600;color:var(--primary-blue);">¥${execConfirmed.toLocaleString()}</div>
-                        <div style="font-size:0.6rem;color:var(--text-light);">${execTarget > 0 ? '目標 ¥' + (execTarget / 10000).toFixed(0) + '万' : ''}</div>
+                        <div class="number" style="font-size:0.95rem;font-weight:600;color:var(--primary-blue);">¥${execConfirmed.toLocaleString()}</div>
+                        <div style="font-size:0.6rem;color:var(--text-light);">${execTarget > 0 ? '目標 ¥' + (execTarget / 10000).toFixed(0) + '万 | ' + confirmedRate + '%' : ''}</div>
                     </div>
                 </div>
+                <div style="font-size:0.65rem;color:var(--text-light);margin-bottom:6px;">実施見込 ¥${execForecast.toLocaleString()}</div>
                 <div class="progress-bar">
                     <div class="progress-bar-fill" style="width:${Math.min(acqRate, 100)}%;background:${barColor};"></div>
                     <div class="progress-bar-line" style="left:${Math.min(standardProgress, 100)}%;"></div>
@@ -770,34 +767,34 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
                     <span class="member-name">${displayName(member.member_name)}</span>
                     <span class="member-team-badge">${member.team_name}</span>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:4px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">
                     <div>
                         <div style="font-size:0.7rem;color:var(--text-light);">取得</div>
-                        <div style="font-size:0.95rem;font-weight:700;font-family:'Poppins',sans-serif;">¥${acqAmount.toLocaleString()}</div>
+                        <div style="font-size:1.1rem;font-weight:700;font-family:'Poppins',sans-serif;">¥${acqAmount.toLocaleString()}</div>
                         ${acqTarget > 0 ? `
                         <div class="progress-bar" style="margin-top:4px;">
                             <div class="progress-bar-fill" style="width:${Math.min(acqRate, 100)}%;background:${acqBarColor};"></div>
                             <div class="progress-bar-line" style="left:${Math.min(standardProgress || 0, 100)}%;"></div>
                         </div>
-                        <div style="font-size:0.6rem;color:var(--text-light);">目標 ¥${(acqTarget / 10000).toFixed(0)}万 | ${acqRate}%</div>
+                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(acqTarget / 10000).toFixed(0)}万 | ${acqRate}%</div>
                         ` : ''}
                     </div>
                     <div>
-                        <div style="font-size:0.7rem;color:var(--text-light);">実施見込</div>
-                        <div style="font-size:0.95rem;font-weight:700;font-family:'Poppins',sans-serif;color:var(--text-dark);">¥${execForecast.toLocaleString()}</div>
-                        <div style="font-size:0.6rem;color:var(--text-light);margin-top:4px;">未確認+実施の合計</div>
-                    </div>
-                    <div>
                         <div style="font-size:0.7rem;color:var(--text-light);">実施確定</div>
-                        <div style="font-size:0.95rem;font-weight:700;font-family:'Poppins',sans-serif;color:var(--primary-blue);">¥${execConfirmed.toLocaleString()}</div>
+                        <div style="font-size:1.1rem;font-weight:700;font-family:'Poppins',sans-serif;color:var(--primary-blue);">¥${execConfirmed.toLocaleString()}</div>
                         ${execTarget > 0 ? `
                         <div class="progress-bar" style="margin-top:4px;">
                             <div class="progress-bar-fill" style="width:${Math.min(confirmedRate, 100)}%;background:${confirmedBarColor};"></div>
                             <div class="progress-bar-line" style="left:${Math.min(standardProgress || 0, 100)}%;"></div>
                         </div>
-                        <div style="font-size:0.6rem;color:var(--text-light);">目標 ¥${(execTarget / 10000).toFixed(0)}万 | ${confirmedRate}%</div>
+                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(execTarget / 10000).toFixed(0)}万 | ${confirmedRate}%</div>
                         ` : ''}
                     </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border-color);">
+                    <span style="font-size:0.65rem;color:var(--text-light);">実施見込</span>
+                    <span style="font-size:0.8rem;font-weight:600;font-family:'Poppins',sans-serif;">¥${execForecast.toLocaleString()}</span>
+                    <span style="font-size:0.6rem;color:var(--text-light);">（未確認+実施）</span>
                 </div>
             </div>
         `;
