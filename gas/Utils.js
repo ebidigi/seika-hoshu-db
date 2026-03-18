@@ -48,6 +48,20 @@ const MEMBER_NAME_MAP = {
   '村上 夢果': '村上'
 };
 
+// スプレッドシート案件名 → DB正規名マッピング
+const PROJECT_NAME_MAP = {
+  '工takumi': 'takumi'
+};
+
+/**
+ * スプレッドシートの案件名をDB正規名に変換
+ */
+function normalizeProjectName(rawName) {
+  if (!rawName) return '';
+  var name = String(rawName).trim();
+  return PROJECT_NAME_MAP[name] || name;
+}
+
 /**
  * スプレッドシートの担当者名をDB正規名に変換
  */

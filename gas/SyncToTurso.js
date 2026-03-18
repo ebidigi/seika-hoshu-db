@@ -115,7 +115,7 @@ function upsertPerformanceBatch(rows) {
     // appointment_amountはスプシに存在しないため0（後でprojectsテーブルの単価から計算）
     const args = [
       normalizeMemberName(memberName),
-      String(projectName || '').trim(),
+      normalizeProjectName(projectName),
       formattedDate,
       parseFloat(callHours) || 0,
       parseInt(callCount) || 0,
@@ -218,7 +218,7 @@ function syncSalesReportToTursoSeika() {
   if (targetRows.length === 0) return;
 
   // 案件をprojectsテーブルに自動登録（未登録のもの）
-  const projectNames = [...new Set(targetRows.map(r => String(r[2] || '').trim()).filter(Boolean))];
+  const projectNames = [...new Set(targetRows.map(r => normalizeProjectName(r[2])).filter(Boolean))];
   if (projectNames.length > 0) {
     const projRequests = projectNames.map(name => ({
       type: 'execute',
@@ -291,7 +291,7 @@ function upsertAppointmentBatch(rows) {
     // H:部署, I:役職, J:名前, K:電話番号, L:メールアドレス, M:架電ヒアリング,
     // N:営業区分, O:リスケ, P:取引
     const memberName = normalizeMemberName(row[0]);         // A: 営業担当者
-    const projectName = String(row[2] || '').trim();      // C: 案件名
+    const projectName = normalizeProjectName(row[2]);      // C: 案件名
     const customerName = String(row[3] || '').trim();     // D: 会社名
     const acquisitionDate = formatDateGAS(row[4]);        // E: 取得日
     const scheduledDate = formatDateGAS(row[5]);          // F: 実施日時
