@@ -147,9 +147,9 @@ function sendTaaanDailySummary() {
   try {
     var todayStr = formatDateGAS(new Date());
 
-    // 本日TAAAN自動更新されたアポを取得
+    // 本日TAAAN自動更新されたアポを取得（GAS経由 or 手動一括更新）
     var updated = queryTurso(
-      "SELECT customer_name, project_name, member_name, scheduled_date, status, amount FROM appointments WHERE confirmed_by = 'TAAN/Slack' AND confirmation_date = ? ORDER BY status, customer_name",
+      "SELECT customer_name, project_name, member_name, scheduled_date, status, amount FROM appointments WHERE confirmed_by IN ('TAAN/Slack', 'TAAAN自動') AND confirmation_date = ? ORDER BY project_name, customer_name",
       [todayStr]
     );
 
@@ -171,39 +171,49 @@ function sendTaaanDailySummary() {
       return;
     }
 
-    var message = '🔄 TAAAN アポステータス更新レポート（' + todayStr + '）\n';
+    var message = '🔄 アポステータス自動更新レポート（' + todayStr + '）\n';
     message += '━━━━━━━━━━━━━━━━━━\n';
 
-    // 本日更新分
+    // 本日更新分（案件ごとにグルーピング）
     if (updated && updated.length > 0) {
-      message += '\n【本日の自動更新: ' + updated.length + '件】\n';
+      var byProject = {};
       for (var i = 0; i < updated.length; i++) {
         var u = updated[i];
-        var statusIcon = u.status === '実施' ? '✅' : u.status === 'キャンセル' ? '❌' : u.status === 'リスケ' ? '🔄' : '❓';
-        message += statusIcon + ' ' + (u.customer_name || '不明') + '（' + (u.project_name || '') + '）\n';
-        message += '　　' + (u.member_name || '') + ' | ' + (u.scheduled_date || '-') + ' | ¥' + ((parseInt(u.amount) || 0).toLocaleString()) + '\n';
+        var pn = u.project_name || '不明';
+        if (!byProject[pn]) byProject[pn] = [];
+        byProject[pn].push(u);
+      }
+
+      message += '\n【本日の自動更新: ' + updated.length + '件】\n';
+      var projectNames = Object.keys(byProject).sort();
+      for (var p = 0; p < projectNames.length; p++) {
+        var projName = projectNames[p];
+        var items = byProject[projName];
+        message += '\n📁 ' + projName + '（' + items.length + '件）\n';
+        for (var k = 0; k < items.length; k++) {
+          var item = items[k];
+          var icon = item.status === '実施' ? '✅' : item.status === 'キャンセル' ? '❌' : item.status === 'リスケ' ? '🔄' : '❓';
+          message += '　' + icon + ' ' + (item.customer_name || '不明');
+          message += '｜' + (item.member_name || '') + '｜' + (item.scheduled_date || '-');
+          message += '｜¥' + ((parseInt(item.amount) || 0).toLocaleString()) + '\n';
+        }
       }
     } else {
-      message += '\n【本日の自動更新】なし\n';
+      message += '\n本日の自動更新はありません\n';
     }
 
     // 未確認アポ
     if (unconfirmed && unconfirmed.length > 0) {
-      // 実施日が過ぎているもの
       var overdue = unconfirmed.filter(function(a) { return a.scheduled_date && a.scheduled_date <= todayStr; });
       var upcoming = unconfirmed.filter(function(a) { return !a.scheduled_date || a.scheduled_date > todayStr; });
 
       if (overdue.length > 0) {
-        message += '\n⚠️ 【実施日超過で未確認: ' + overdue.length + '件】\n';
-        for (var j = 0; j < overdue.length; j++) {
-          var o = overdue[j];
-          message += '・' + (o.customer_name || '不明') + '（' + (o.project_name || '') + '）' + (o.scheduled_date || '') + '\n';
-        }
+        message += '\n⚠️ 実施日超過で未確認: ' + overdue.length + '件\n';
+        message += '→ ダッシュボードのアポ確認タブで確認をお願いします\n';
       }
 
       if (upcoming.length > 0) {
-        message += '\n📋 【今月の未確認: ' + upcoming.length + '件】\n';
-        message += '→ ダッシュボードのアポ確認タブで確認してください\n';
+        message += '\n📋 今月の未確認アポ（実施日前）: ' + upcoming.length + '件\n';
       }
     }
 
