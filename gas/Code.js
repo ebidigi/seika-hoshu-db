@@ -120,5 +120,5 @@ function setupTriggersSeika() {
 // 各時間帯用のラッパー関数
 function sendSeikaSlackNotification12() { sendSeikaSlackNotification(); }
 function sendSeikaSlackNotification15() { sendSeikaSlackNotification(); }
-function sendSeikaSlackNotification18() { sendSeikaSlackNotification(); }
+function sendSeikaSlackNotification18() { sendSeikaSlackNotification(); sendTaaanDailySummary(); }
 function sendSeikaSlackNotification20() { sendSeikaSlackNotification(); }

@@ -138,3 +138,79 @@ function sendSeikaSlackNotification() {
     sendSlackNotificationSeika('❌ 成果報酬チーム売上速報の生成でエラーが発生しました: ' + error.message);
   }
 }
+
+/**
+ * TAAAN自動更新の日次サマリ通知（18:00トリガー）
+ * 本日更新されたアポと、未確認のままのアポを通知
+ */
+function sendTaaanDailySummary() {
+  try {
+    var todayStr = formatDateGAS(new Date());
+
+    // 本日TAAAN自動更新されたアポを取得
+    var updated = queryTurso(
+      "SELECT customer_name, project_name, member_name, scheduled_date, status, amount FROM appointments WHERE confirmed_by = 'TAAN/Slack' AND confirmation_date = ? ORDER BY status, customer_name",
+      [todayStr]
+    );
+
+    // 未確認のアポを取得（当月実施予定）
+    var now = new Date();
+    var ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+    var startDate = ym + '-01';
+    var lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    var endDate = ym + '-' + String(lastDay).padStart(2, '0');
+
+    var unconfirmed = queryTurso(
+      "SELECT customer_name, project_name, member_name, scheduled_date, amount FROM appointments WHERE status = '未確認' AND scheduled_date >= ? AND scheduled_date <= ? ORDER BY scheduled_date",
+      [startDate, endDate]
+    );
+
+    // 更新も未確認もなければ通知不要
+    if ((!updated || updated.length === 0) && (!unconfirmed || unconfirmed.length === 0)) {
+      Logger.log('TAAAN日次サマリ: 通知対象なし');
+      return;
+    }
+
+    var message = '🔄 TAAAN アポステータス更新レポート（' + todayStr + '）\n';
+    message += '━━━━━━━━━━━━━━━━━━\n';
+
+    // 本日更新分
+    if (updated && updated.length > 0) {
+      message += '\n【本日の自動更新: ' + updated.length + '件】\n';
+      for (var i = 0; i < updated.length; i++) {
+        var u = updated[i];
+        var statusIcon = u.status === '実施' ? '✅' : u.status === 'キャンセル' ? '❌' : u.status === 'リスケ' ? '🔄' : '❓';
+        message += statusIcon + ' ' + (u.customer_name || '不明') + '（' + (u.project_name || '') + '）\n';
+        message += '　　' + (u.member_name || '') + ' | ' + (u.scheduled_date || '-') + ' | ¥' + ((parseInt(u.amount) || 0).toLocaleString()) + '\n';
+      }
+    } else {
+      message += '\n【本日の自動更新】なし\n';
+    }
+
+    // 未確認アポ
+    if (unconfirmed && unconfirmed.length > 0) {
+      // 実施日が過ぎているもの
+      var overdue = unconfirmed.filter(function(a) { return a.scheduled_date && a.scheduled_date <= todayStr; });
+      var upcoming = unconfirmed.filter(function(a) { return !a.scheduled_date || a.scheduled_date > todayStr; });
+
+      if (overdue.length > 0) {
+        message += '\n⚠️ 【実施日超過で未確認: ' + overdue.length + '件】\n';
+        for (var j = 0; j < overdue.length; j++) {
+          var o = overdue[j];
+          message += '・' + (o.customer_name || '不明') + '（' + (o.project_name || '') + '）' + (o.scheduled_date || '') + '\n';
+        }
+      }
+
+      if (upcoming.length > 0) {
+        message += '\n📋 【今月の未確認: ' + upcoming.length + '件】\n';
+        message += '→ ダッシュボードのアポ確認タブで確認してください\n';
+      }
+    }
+
+    sendSlackNotificationSeika(message);
+    Logger.log('TAAAN日次サマリ送信完了');
+
+  } catch (error) {
+    Logger.log('TAAAN日次サマリエラー: ' + error.message);
+  }
+}
