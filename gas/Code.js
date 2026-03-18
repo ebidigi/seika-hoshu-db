@@ -55,10 +55,7 @@ function setupTriggersSeika() {
     const name = trigger.getHandlerFunction();
     if (name === 'syncPerformanceToTursoSeika' ||
         name === 'syncSalesReportToTursoSeika' ||
-        name === 'sendSeikaSlackNotification12' ||
-        name === 'sendSeikaSlackNotification15' ||
-        name === 'sendSeikaSlackNotification18' ||
-        name === 'sendSeikaSlackNotification20' ||
+        name === 'sendTaaanDailySummary18' ||
         name === 'syncSlackAppoStatusToTurso') {
       ScriptApp.deleteTrigger(trigger);
     }
@@ -76,34 +73,10 @@ function setupTriggersSeika() {
     .everyMinutes(15)
     .create();
 
-  // Slack通知: 12:00
-  ScriptApp.newTrigger('sendSeikaSlackNotification12')
-    .timeBased()
-    .atHour(12)
-    .nearMinute(0)
-    .everyDays(1)
-    .create();
-
-  // Slack通知: 15:00
-  ScriptApp.newTrigger('sendSeikaSlackNotification15')
-    .timeBased()
-    .atHour(15)
-    .nearMinute(0)
-    .everyDays(1)
-    .create();
-
-  // Slack通知: 18:00
-  ScriptApp.newTrigger('sendSeikaSlackNotification18')
+  // TAAAN日次サマリ: 18:00
+  ScriptApp.newTrigger('sendTaaanDailySummary18')
     .timeBased()
     .atHour(18)
-    .nearMinute(0)
-    .everyDays(1)
-    .create();
-
-  // Slack通知: 20:00
-  ScriptApp.newTrigger('sendSeikaSlackNotification20')
-    .timeBased()
-    .atHour(20)
     .nearMinute(0)
     .everyDays(1)
     .create();
@@ -117,8 +90,5 @@ function setupTriggersSeika() {
   Logger.log('All triggers set up successfully');
 }
 
-// 各時間帯用のラッパー関数
-function sendSeikaSlackNotification12() { sendSeikaSlackNotification(); }
-function sendSeikaSlackNotification15() { sendSeikaSlackNotification(); }
-function sendSeikaSlackNotification18() { sendSeikaSlackNotification(); sendTaaanDailySummary(); }
-function sendSeikaSlackNotification20() { sendSeikaSlackNotification(); }
+// ラッパー関数
+function sendTaaanDailySummary18() { sendTaaanDailySummary(); }
