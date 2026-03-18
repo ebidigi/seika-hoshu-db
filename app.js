@@ -1576,71 +1576,81 @@ function editProjectField(el, projectName, field, currentValue) {
     });
 }
 
-async function renderCapTable() {
-    const ym = document.getElementById('filterMonth').value;
-    try {
-        const caps = await queryTurso("SELECT * FROM project_monthly_caps WHERE year_month = ?", [ym]);
-
-        // キャップサマリー集計
-        let totalCap = 0, totalActual = 0;
-        caps.forEach(c => {
-            totalCap += c.cap_count || 0;
-            totalActual += c.actual_count || 0;
+function renderCapTable() {
+    // projectsData + appointmentsData から案件別キャップ vs 実績を計算
+    const caps = projectsData
+        .filter(p => p.monthly_cap_count > 0)
+        .map(p => {
+            const actual = appointmentsData.filter(a => a.project_name === p.project_name).length;
+            const unitPrice = p.unit_price || 0;
+            return {
+                project_name: p.project_name,
+                cap_count: p.monthly_cap_count,
+                cap_amount: unitPrice * p.monthly_cap_count,
+                actual_count: actual,
+                actual_amount: unitPrice * actual
+            };
         });
-        const totalRemaining = totalCap - totalActual;
-        const totalRate = totalCap > 0 ? Math.round(totalActual / totalCap * 100) : 0;
-        const rateColor = totalRate >= 100 ? 'var(--primary-red)' : totalRate >= 80 ? '#ede07d' : 'var(--success)';
 
-        document.getElementById('capSummary').innerHTML = `
-            <div class="cap-summary-grid">
-                <div class="cap-summary-item">
-                    <div class="cap-summary-label">合計キャップ</div>
-                    <div class="cap-summary-value">${totalCap}<span class="cap-summary-unit">件</span></div>
-                </div>
-                <div class="cap-summary-item">
-                    <div class="cap-summary-label">合計実績</div>
-                    <div class="cap-summary-value">${totalActual}<span class="cap-summary-unit">件</span></div>
-                </div>
-                <div class="cap-summary-item">
-                    <div class="cap-summary-label">残キャップ</div>
-                    <div class="cap-summary-value" style="color:${totalRemaining <= 0 ? 'var(--primary-red)' : 'var(--text-dark)'}">${totalRemaining}<span class="cap-summary-unit">件</span></div>
-                </div>
-                <div class="cap-summary-item">
-                    <div class="cap-summary-label">消化率</div>
-                    <div class="cap-summary-value" style="color:${rateColor}">${totalRate}<span class="cap-summary-unit">%</span></div>
-                    <div class="cap-summary-bar">
-                        <div class="cap-summary-bar-fill" style="width:${Math.min(totalRate, 100)}%;background:${rateColor};"></div>
-                    </div>
+    // キャップサマリー集計
+    let totalCap = 0, totalActual = 0, totalCapAmount = 0, totalActualAmount = 0;
+    caps.forEach(c => {
+        totalCap += c.cap_count || 0;
+        totalActual += c.actual_count || 0;
+        totalCapAmount += c.cap_amount || 0;
+        totalActualAmount += c.actual_amount || 0;
+    });
+    const totalRemaining = totalCap - totalActual;
+    const totalRate = totalCap > 0 ? Math.round(totalActual / totalCap * 100) : 0;
+    const rateColor = totalRate >= 100 ? 'var(--primary-red)' : totalRate >= 80 ? '#ede07d' : 'var(--success)';
+
+    document.getElementById('capSummary').innerHTML = `
+        <div class="cap-summary-grid">
+            <div class="cap-summary-item">
+                <div class="cap-summary-label">合計キャップ</div>
+                <div class="cap-summary-value">${totalCap}<span class="cap-summary-unit">件</span></div>
+            </div>
+            <div class="cap-summary-item">
+                <div class="cap-summary-label">合計実績</div>
+                <div class="cap-summary-value">${totalActual}<span class="cap-summary-unit">件</span></div>
+            </div>
+            <div class="cap-summary-item">
+                <div class="cap-summary-label">残キャップ</div>
+                <div class="cap-summary-value" style="color:${totalRemaining <= 0 ? 'var(--primary-red)' : 'var(--text-dark)'}">${totalRemaining}<span class="cap-summary-unit">件</span></div>
+            </div>
+            <div class="cap-summary-item">
+                <div class="cap-summary-label">消化率</div>
+                <div class="cap-summary-value" style="color:${rateColor}">${totalRate}<span class="cap-summary-unit">%</span></div>
+                <div class="cap-summary-bar">
+                    <div class="cap-summary-bar-fill" style="width:${Math.min(totalRate, 100)}%;background:${rateColor};"></div>
                 </div>
             </div>
+        </div>
+    `;
+
+    let rows = '';
+    caps.forEach(c => {
+        const countRate = c.cap_count > 0 ? (c.actual_count / c.cap_count * 100).toFixed(0) : '-';
+        const barWidth = c.cap_count > 0 ? Math.min(c.actual_count / c.cap_count * 100, 100) : 0;
+        const barColor = barWidth >= 100 ? 'var(--primary-red)' : barWidth >= 80 ? '#ede07d' : 'var(--success)';
+
+        rows += `
+            <tr>
+                <td>${c.project_name}</td>
+                <td class="text-right number">${c.cap_count}</td>
+                <td class="text-right number">${c.actual_count}</td>
+                <td class="text-right number">${countRate}%</td>
+                <td class="text-right number">¥${(c.cap_amount || 0).toLocaleString()}</td>
+                <td class="text-right number">¥${(c.actual_amount || 0).toLocaleString()}</td>
+                <td>
+                    <div class="progress-bar" style="width:100px;">
+                        <div class="progress-bar-fill" style="width:${barWidth}%;background:${barColor};"></div>
+                    </div>
+                </td>
+            </tr>
         `;
-
-        let rows = '';
-        caps.forEach(c => {
-            const countRate = c.cap_count > 0 ? (c.actual_count / c.cap_count * 100).toFixed(0) : '-';
-            const amountRate = c.cap_amount > 0 ? (c.actual_amount / c.cap_amount * 100).toFixed(0) : '-';
-            const barWidth = c.cap_count > 0 ? Math.min(c.actual_count / c.cap_count * 100, 100) : 0;
-
-            rows += `
-                <tr>
-                    <td>${c.project_name}</td>
-                    <td class="text-right number">${c.cap_count || '-'}</td>
-                    <td class="text-right number">${c.actual_count}</td>
-                    <td class="text-right number">${countRate}%</td>
-                    <td class="text-right number">¥${(c.cap_amount || 0).toLocaleString()}</td>
-                    <td class="text-right number">¥${(c.actual_amount || 0).toLocaleString()}</td>
-                    <td>
-                        <div class="progress-bar" style="width:100px;">
-                            <div class="progress-bar-fill" style="width:${barWidth}%;background:var(--success);"></div>
-                        </div>
-                    </td>
-                </tr>
-            `;
-        });
-        document.getElementById('capTableBody').innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text-light);">データなし</td></tr>';
-    } catch (e) {
-        console.error('Cap table error:', e);
-    }
+    });
+    document.getElementById('capTableBody').innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text-light);">キャップ設定のある案件がありません</td></tr>';
 }
 
 // ==================== アサイン管理 ====================
