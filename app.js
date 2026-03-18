@@ -561,7 +561,7 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
 
     document.getElementById('salesTargetCard').innerHTML = `
         <div class="sales-target-card" style="grid-template-columns:1fr;">
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
                 <div>
                     <div class="sales-target-label">取得金額（目標: ¥${monthlyTarget.toLocaleString()}）</div>
                     <div class="sales-target-amount">¥${acquisitionAmount.toLocaleString()}</div>
@@ -577,13 +577,8 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
                     </div>
                 </div>
                 <div>
-                    <div class="sales-target-label">実施見込</div>
-                    <div class="sales-target-amount">¥${execExpected.toLocaleString()}</div>
-                    <div style="font-size:0.75rem;color:var(--text-light);margin-top:8px;">未確認 ¥${execUnconfirmed.toLocaleString()} + 確定 ¥${execConfirmed.toLocaleString()}</div>
-                </div>
-                <div>
                     <div class="sales-target-label">実施確定（目標: ¥${executionTarget.toLocaleString()}）</div>
-                    <div class="sales-target-amount" style="color:var(--primary-blue);">¥${execConfirmed.toLocaleString()}</div>
+                    <div class="sales-target-amount" style="color:#90b8f8;">¥${execConfirmed.toLocaleString()}</div>
                     <div class="sales-target-bar-wrap" style="margin-top:8px;">
                         <div class="sales-target-bar-info">
                             <span>達成率 ${confirmedRate}%</span>
@@ -595,6 +590,11 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
                         </div>
                     </div>
                 </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.15);">
+                <span style="font-size:0.8rem;color:rgba(255,255,255,0.6);">実施見込</span>
+                <span style="font-size:1rem;font-weight:600;">¥${execExpected.toLocaleString()}</span>
+                <span style="font-size:0.75rem;color:rgba(255,255,255,0.5);">（未確認 ¥${execUnconfirmed.toLocaleString()} + 確定 ¥${execConfirmed.toLocaleString()}）</span>
             </div>
         </div>
     `;
