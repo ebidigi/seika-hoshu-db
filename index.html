@@ -56,17 +56,17 @@
                     </svg>
                     <span class="sidebar-item-text">アポ確認</span>
                 </button>
-                <button class="sidebar-item" data-tab="yield" onclick="switchTab('yield')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-                    </svg>
-                    <span class="sidebar-item-text">歩留まり</span>
-                </button>
                 <button class="sidebar-item" data-tab="projects" onclick="switchTab('projects')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/>
                     </svg>
                     <span class="sidebar-item-text">案件管理</span>
+                </button>
+                <button class="sidebar-item" data-tab="yield" onclick="switchTab('yield')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                    </svg>
+                    <span class="sidebar-item-text">歩留まり</span>
                 </button>
                 <button class="sidebar-item" data-tab="analysis" onclick="switchTab('analysis')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -174,65 +174,7 @@
 
                 </div>
 
-                <!-- Tab 3: 歩留まり分析 -->
-                <div class="tab-content" id="tab-yield">
-                    <div class="section-title">歩留まりファネル</div>
-                    <div class="funnel-container" id="funnelContainer"></div>
-
-                    <div class="section-title">歩留まりレート比較</div>
-                    <div style="overflow-x:auto;">
-                        <table class="data-table" id="yieldTable">
-                            <thead>
-                                <tr>
-                                    <th>名前</th>
-                                    <th class="text-right">架電数</th>
-                                    <th class="text-right">PR数</th>
-                                    <th class="text-right">アポ数</th>
-                                    <th class="text-right">実施数</th>
-                                    <th class="text-right">架電toPR率</th>
-                                    <th class="text-right">PRtoアポ率</th>
-                                    <th class="text-right">アポto実施率</th>
-                                    <th class="text-right">架電toアポ率</th>
-                                </tr>
-                            </thead>
-                            <tbody id="yieldTableBody"></tbody>
-                        </table>
-                        <div style="font-size:0.7rem;color:var(--text-light);margin-top:6px;">基準値: 架電toPR率 15% / PRtoアポ率 30% / 架電toアポ率 3%（<span style="color:var(--primary-red);">赤字</span> = 基準未達）</div>
-                    </div>
-
-                    <div style="margin-top:32px;">
-                        <div class="section-title">診断・改善示唆</div>
-                        <div class="diagnosis-grid" id="diagnosisGrid"></div>
-                    </div>
-
-                    <div style="margin-top:32px;">
-                        <div class="section-title">案件別 歩留まり</div>
-                        <div style="overflow-x:auto;">
-                            <table class="data-table" id="projectYieldTable">
-                                <thead>
-                                    <tr>
-                                        <th>案件名</th>
-                                        <th class="text-right">架電数</th>
-                                        <th class="text-right">PR数</th>
-                                        <th class="text-right">アポ数</th>
-                                        <th class="text-right">架電toPR率</th>
-                                        <th class="text-right">PRtoアポ率</th>
-                                        <th class="text-right">架電toアポ率</th>
-                                        <th>アラート</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="projectYieldTableBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div style="margin-top:32px;">
-                        <div class="section-title">案件別 診断・改善示唆</div>
-                        <div id="projectDiagnosisGrid"></div>
-                    </div>
-                </div>
-
-                <!-- Tab 4: 案件管理 -->
+                <!-- Tab 3: 案件管理 -->
                 <div class="tab-content" id="tab-projects">
                     <div class="section-title" style="margin-bottom:8px;">月次キャップ進捗</div>
                     <div class="cap-summary" id="capSummary"></div>
@@ -300,6 +242,64 @@
                             </thead>
                             <tbody id="capTableBody"></tbody>
                         </table>
+                    </div>
+                </div>
+
+                <!-- Tab 4: 歩留まり分析 -->
+                <div class="tab-content" id="tab-yield">
+                    <div class="section-title">歩留まりファネル</div>
+                    <div class="funnel-container" id="funnelContainer"></div>
+
+                    <div class="section-title">歩留まりレート比較</div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="yieldTable">
+                            <thead>
+                                <tr>
+                                    <th>名前</th>
+                                    <th class="text-right">架電数</th>
+                                    <th class="text-right">PR数</th>
+                                    <th class="text-right">アポ数</th>
+                                    <th class="text-right">実施数</th>
+                                    <th class="text-right">架電toPR率</th>
+                                    <th class="text-right">PRtoアポ率</th>
+                                    <th class="text-right">アポto実施率</th>
+                                    <th class="text-right">架電toアポ率</th>
+                                </tr>
+                            </thead>
+                            <tbody id="yieldTableBody"></tbody>
+                        </table>
+                        <div style="font-size:0.7rem;color:var(--text-light);margin-top:6px;">基準値: 架電toPR率 15% / PRtoアポ率 30% / 架電toアポ率 3%（<span style="color:var(--primary-red);">赤字</span> = 基準未達）</div>
+                    </div>
+
+                    <div style="margin-top:32px;">
+                        <div class="section-title">診断・改善示唆</div>
+                        <div class="diagnosis-grid" id="diagnosisGrid"></div>
+                    </div>
+
+                    <div style="margin-top:32px;">
+                        <div class="section-title">案件別 歩留まり</div>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table" id="projectYieldTable">
+                                <thead>
+                                    <tr>
+                                        <th>案件名</th>
+                                        <th class="text-right">架電数</th>
+                                        <th class="text-right">PR数</th>
+                                        <th class="text-right">アポ数</th>
+                                        <th class="text-right">架電toPR率</th>
+                                        <th class="text-right">PRtoアポ率</th>
+                                        <th class="text-right">架電toアポ率</th>
+                                        <th>アラート</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="projectYieldTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:32px;">
+                        <div class="section-title">案件別 診断・改善示唆</div>
+                        <div id="projectDiagnosisGrid"></div>
                     </div>
                 </div>
 
