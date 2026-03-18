@@ -1862,15 +1862,24 @@ async function copyAssignmentsToNextMonth() {
 }
 
 // ==================== Tab 5: 詳細分析 ====================
-function renderAnalysis(perfData, filter) {
+async function renderAnalysis(perfData, filter) {
     if (currentAnalysisView === 'daily') {
         renderDailyAnalysis(perfData, filter);
+        renderAnalysisChart(perfData, filter);
     } else if (currentAnalysisView === 'weekly') {
         renderWeeklyAnalysis(perfData, filter);
+        renderAnalysisChart(perfData, filter);
     } else {
         renderMonthlyAnalysis(filter);
+        // 月次チャートは全期間データが必要なのでDBから取得
+        try {
+            const allPerf = await queryTurso("SELECT input_date, call_count, pr_count, appointment_count, appointment_amount FROM performance_rawdata");
+            renderAnalysisChart(allPerf, filter);
+        } catch (e) {
+            console.error('Monthly chart data error:', e);
+            renderAnalysisChart(perfData, filter);
+        }
     }
-    renderAnalysisChart(perfData, filter);
 }
 
 function renderDailyAnalysis(perfData, filter) {
@@ -2014,42 +2023,77 @@ async function renderMonthlyAnalysis(filter) {
 }
 
 function renderAnalysisChart(perfData, filter) {
-    // 日付ごとに集計
-    const dateMap = {};
-    perfData.forEach(d => {
-        if (!dateMap[d.input_date]) {
-            dateMap[d.input_date] = { calls: 0, pr: 0, appo: 0, amount: 0 };
-        }
-        dateMap[d.input_date].calls += d.call_count || 0;
-        dateMap[d.input_date].pr += d.pr_count || 0;
-        dateMap[d.input_date].appo += d.appointment_count || 0;
-        dateMap[d.input_date].amount += d.appointment_amount || 0;
-    });
+    const bucketMap = {};
 
-    const dates = Object.keys(dateMap).sort();
-    const labels = dates.map(d => d.substring(5)); // MM-DD
+    if (currentAnalysisView === 'monthly') {
+        // 月別集計
+        perfData.forEach(d => {
+            const month = d.input_date ? d.input_date.substring(0, 7) : null;
+            if (!month) return;
+            if (!bucketMap[month]) bucketMap[month] = { calls: 0, pr: 0, appo: 0, amount: 0 };
+            bucketMap[month].calls += d.call_count || 0;
+            bucketMap[month].pr += d.pr_count || 0;
+            bucketMap[month].appo += d.appointment_count || 0;
+            bucketMap[month].amount += d.appointment_amount || 0;
+        });
+    } else if (currentAnalysisView === 'weekly') {
+        // 週別集計（月曜始まり）
+        perfData.forEach(d => {
+            if (!d.input_date) return;
+            const dt = new Date(d.input_date);
+            const day = dt.getDay();
+            const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
+            const monday = new Date(dt);
+            monday.setDate(diff);
+            const weekKey = monday.toISOString().substring(0, 10);
+            if (!bucketMap[weekKey]) bucketMap[weekKey] = { calls: 0, pr: 0, appo: 0, amount: 0 };
+            bucketMap[weekKey].calls += d.call_count || 0;
+            bucketMap[weekKey].pr += d.pr_count || 0;
+            bucketMap[weekKey].appo += d.appointment_count || 0;
+            bucketMap[weekKey].amount += d.appointment_amount || 0;
+        });
+    } else {
+        // 日別集計
+        perfData.forEach(d => {
+            if (!d.input_date) return;
+            if (!bucketMap[d.input_date]) bucketMap[d.input_date] = { calls: 0, pr: 0, appo: 0, amount: 0 };
+            bucketMap[d.input_date].calls += d.call_count || 0;
+            bucketMap[d.input_date].pr += d.pr_count || 0;
+            bucketMap[d.input_date].appo += d.appointment_count || 0;
+            bucketMap[d.input_date].amount += d.appointment_amount || 0;
+        });
+    }
+
+    const dates = Object.keys(bucketMap).sort();
+    const labels = currentAnalysisView === 'monthly' ? dates : dates.map(d => d.substring(5));
 
     let dataValues, label, color;
     switch (currentAnalysisChart) {
         case 'pr':
-            dataValues = dates.map(d => dateMap[d].pr);
+            dataValues = dates.map(d => bucketMap[d].pr);
             label = 'PR数';
             color = '#00a2da';
             break;
         case 'appo':
-            dataValues = dates.map(d => dateMap[d].appo);
+            dataValues = dates.map(d => bucketMap[d].appo);
             label = 'アポ数';
             color = '#e8d335';
             break;
         case 'amount':
-            dataValues = dates.map(d => dateMap[d].amount);
+            dataValues = dates.map(d => bucketMap[d].amount);
             label = '金額';
             color = '#86aaec';
             break;
         default:
-            dataValues = dates.map(d => dateMap[d].calls);
+            dataValues = dates.map(d => bucketMap[d].calls);
             label = '架電数';
             color = '#1155cc';
+    }
+
+    // チャートタイトルをビューに合わせて更新
+    const chartTitle = document.getElementById('analysisChartTitle');
+    if (chartTitle) {
+        chartTitle.textContent = currentAnalysisView === 'monthly' ? '月別トレンド' : currentAnalysisView === 'weekly' ? '週別トレンド' : '日別トレンド';
     }
 
     if (charts.analysis) charts.analysis.destroy();
