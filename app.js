@@ -101,7 +101,8 @@ const MEMBER_NAME_NORMALIZE = {
     '中村 峻也': '中村た', '中村峻也': '中村た', '@中村 峻也/nakamura takaya': '中村た',
     '田中克樹': '田中か', '@田中克樹/katsuki tanaka': '田中か',
     '宮城 啓生': '宮城', '宮城啓生': '宮城', '@宮城 啓生/miyagi hiroki': '宮城', '宮城一平': '宮城', '@宮城一平': '宮城',
-    '@田中颯汰/tanaka sota': '田中颯汰'
+    '@田中颯汰/tanaka sota': '田中颯汰',
+    '村上夢果': '村上', '村上 夢果': '村上', '@村上夢果': '村上'
 };
 
 function normalizeMemberName(name) {
@@ -630,6 +631,11 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
     const cancelRate = execCount > 0 ? (execCancelledCount / execCount * 100).toFixed(1) : '-';
     const rescheduleRate = execCount > 0 ? (execRescheduleCount / execCount * 100).toFixed(1) : '-';
 
+    // 当月取得件数・当月実施率（acquisition_dateベース）
+    const acqAppoCount = appoData.length;
+    const acqExecCount = appoData.filter(a => a.status === '実施').length;
+    const acqExecutionRate = acqAppoCount > 0 ? (acqExecCount / acqAppoCount * 100).toFixed(1) : '-';
+
     document.getElementById('conversionRates').innerHTML = `
         <div class="conversion-rates-row" style="margin-bottom:12px;">
             <div class="conversion-rate-card">
@@ -669,6 +675,16 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
             <div class="conversion-rate-card">
                 <div class="conversion-rate-value" style="color:${rescheduleRate !== '-' && parseFloat(rescheduleRate) > 15 ? '#8a7a00' : 'var(--text-dark)'};">${rescheduleRate}%</div>
                 <div class="conversion-rate-label">リスケ率（${execRescheduleCount}件）</div>
+            </div>
+        </div>
+        <div class="conversion-rates-row" style="margin-top:12px;">
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value">${acqAppoCount}</div>
+                <div class="conversion-rate-label">当月取得件数</div>
+            </div>
+            <div class="conversion-rate-card">
+                <div class="conversion-rate-value" style="color:${acqExecutionRate !== '-' && parseFloat(acqExecutionRate) < 80 ? 'var(--primary-red)' : 'var(--primary-blue)'};">${acqExecutionRate}%</div>
+                <div class="conversion-rate-label">当月実施率（${acqExecCount}/${acqAppoCount}件）</div>
             </div>
         </div>
     `;
@@ -926,7 +942,15 @@ function renderMemberGraphs(perfData) {
 // ==================== Tab 2: アポ確認管理 ====================
 function renderAppointments() {
     const filter = getFilters();
-    const allData = filterAppointments(executionAppoData, filter);
+    // executionAppoData（scheduled_dateベース）に加え、appointmentsData（acquisition_dateベース）も
+    // マージして表示。当月取得だがscheduled_dateが異なる月/NULLのアポも表示されるようにする。
+    const execFiltered = filterAppointments(executionAppoData, filter);
+    const acqFiltered = filterAppointments(appointmentsData, filter);
+    const seenIds = new Set(execFiltered.map(a => a.id));
+    const merged = [...execFiltered, ...acqFiltered.filter(a => !seenIds.has(a.id))];
+    // scheduled_date降順 → acquisition_date降順でソート
+    merged.sort((a, b) => (b.scheduled_date || '').localeCompare(a.scheduled_date || '') || (b.acquisition_date || '').localeCompare(a.acquisition_date || ''));
+    const allData = merged;
 
     // サマリーは常に当月全体で計算
     const statusCounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
@@ -997,9 +1021,20 @@ function renderAppointments() {
     let tableData = allData;
     if (!appoShowAll) {
         const today = formatDate(new Date());
-        tableData = tableData.filter(a => a.scheduled_date <= today);
+        tableData = tableData.filter(a => !a.scheduled_date || a.scheduled_date <= today);
     }
-    const filtered = currentAppoFilter === 'all' ? tableData : tableData.filter(a => a.status === currentAppoFilter);
+    let filtered = currentAppoFilter === 'all' ? tableData : tableData.filter(a => a.status === currentAppoFilter);
+
+    // 検索フィルタ
+    const searchInput = document.getElementById('appoSearchInput');
+    const searchQuery = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    if (searchQuery) {
+        filtered = filtered.filter(a =>
+            (a.customer_name || '').toLowerCase().includes(searchQuery) ||
+            (a.project_name || '').toLowerCase().includes(searchQuery) ||
+            (a.member_name || '').toLowerCase().includes(searchQuery)
+        );
+    }
 
     const tbody = document.getElementById('appoTableBody');
     tbody.innerHTML = filtered.map(a => {
@@ -1508,15 +1543,17 @@ function editProjectField(el, projectName, field, currentValue) {
     const display = el.innerHTML;
     const input = document.createElement('input');
     input.type = 'number';
-    input.value = currentValue || '';
+    input.value = '';
+    input.placeholder = currentValue || '0';
     input.style.cssText = 'width:80px;padding:4px 6px;border:1px solid var(--primary-blue);border-radius:4px;font-size:0.85rem;text-align:right;';
     el.innerHTML = '';
     el.appendChild(input);
     input.focus();
-    input.select();
 
     const save = async () => {
-        const newVal = parseInt(input.value) || 0;
+        const rawVal = input.value.trim();
+        if (rawVal === '') { el.innerHTML = display; return; } // 未入力はキャンセル
+        const newVal = parseInt(rawVal) || 0;
         try {
             await executeTurso(
                 `UPDATE projects SET ${field} = ?, updated_at = datetime('now') WHERE project_name = ?`,
@@ -1543,6 +1580,41 @@ async function renderCapTable() {
     const ym = document.getElementById('filterMonth').value;
     try {
         const caps = await queryTurso("SELECT * FROM project_monthly_caps WHERE year_month = ?", [ym]);
+
+        // キャップサマリー集計
+        let totalCap = 0, totalActual = 0;
+        caps.forEach(c => {
+            totalCap += c.cap_count || 0;
+            totalActual += c.actual_count || 0;
+        });
+        const totalRemaining = totalCap - totalActual;
+        const totalRate = totalCap > 0 ? Math.round(totalActual / totalCap * 100) : 0;
+        const rateColor = totalRate >= 100 ? 'var(--primary-red)' : totalRate >= 80 ? '#ede07d' : 'var(--success)';
+
+        document.getElementById('capSummary').innerHTML = `
+            <div class="cap-summary-grid">
+                <div class="cap-summary-item">
+                    <div class="cap-summary-label">合計キャップ</div>
+                    <div class="cap-summary-value">${totalCap}<span class="cap-summary-unit">件</span></div>
+                </div>
+                <div class="cap-summary-item">
+                    <div class="cap-summary-label">合計実績</div>
+                    <div class="cap-summary-value">${totalActual}<span class="cap-summary-unit">件</span></div>
+                </div>
+                <div class="cap-summary-item">
+                    <div class="cap-summary-label">残キャップ</div>
+                    <div class="cap-summary-value" style="color:${totalRemaining <= 0 ? 'var(--primary-red)' : 'var(--text-dark)'}">${totalRemaining}<span class="cap-summary-unit">件</span></div>
+                </div>
+                <div class="cap-summary-item">
+                    <div class="cap-summary-label">消化率</div>
+                    <div class="cap-summary-value" style="color:${rateColor}">${totalRate}<span class="cap-summary-unit">%</span></div>
+                    <div class="cap-summary-bar">
+                        <div class="cap-summary-bar-fill" style="width:${Math.min(totalRate, 100)}%;background:${rateColor};"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+
         let rows = '';
         caps.forEach(c => {
             const countRate = c.cap_count > 0 ? (c.actual_count / c.cap_count * 100).toFixed(0) : '-';
@@ -1827,16 +1899,12 @@ function renderDailyAnalysis(perfData, filter) {
             <th class="text-right">アポ数</th>
             <th class="text-right">金額</th>
             <th class="text-right">稼働時間</th>
-            <th class="text-right">架電toPR</th>
-            <th class="text-right">PRtoアポ</th>
         </tr>
     `;
 
     let rows = '';
     dates.forEach(date => {
         const d = dateMap[date];
-        const ctp = d.calls > 0 ? (d.pr / d.calls * 100).toFixed(1) : '-';
-        const pta = d.pr > 0 ? (d.appo / d.pr * 100).toFixed(1) : '-';
 
         rows += `
             <tr>
@@ -1846,8 +1914,6 @@ function renderDailyAnalysis(perfData, filter) {
                 <td class="text-right number">${d.appo}</td>
                 <td class="text-right number">¥${d.amount.toLocaleString()}</td>
                 <td class="text-right number">${d.hours.toFixed(1)}h</td>
-                <td class="text-right number">${ctp}%</td>
-                <td class="text-right number">${pta}%</td>
             </tr>
         `;
     });

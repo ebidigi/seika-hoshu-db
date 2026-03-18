@@ -1719,6 +1719,58 @@ body {
     .conversion-rate-card { min-width: auto; }
 }
 
+/* ========== キャップサマリー ========== */
+.cap-summary {
+    margin-bottom: 16px;
+}
+.cap-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+.cap-summary-item {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+}
+.cap-summary-label {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    margin-bottom: 4px;
+}
+.cap-summary-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--text-dark);
+    line-height: 1.2;
+}
+.cap-summary-unit {
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-left: 2px;
+}
+.cap-summary-bar {
+    margin-top: 8px;
+    height: 6px;
+    background: var(--gray-200);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.cap-summary-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+@media (max-width: 600px) {
+    .cap-summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
 /* ========== 印刷 ========== */
 @media print {
     .sidebar, .top-header, .filter-section, .refresh-btn { display: none !important; }
