@@ -731,6 +731,10 @@ body {
     white-space: nowrap;
 }
 
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { background: var(--gray-200); }
+.sort-icon { font-size: 0.65rem; color: var(--primary-blue); margin-left: 2px; }
+
 .data-table td {
     padding: 10px 12px;
     font-size: 0.85rem;

@@ -158,13 +158,13 @@
                         <table class="data-table" id="appoTable">
                             <thead>
                                 <tr>
-                                    <th>取得日</th>
-                                    <th>担当者</th>
-                                    <th>案件名</th>
-                                    <th>顧客名</th>
-                                    <th>実施予定日</th>
-                                    <th class="text-right">金額</th>
-                                    <th>ステータス</th>
+                                    <th class="sortable" onclick="sortAppoTable('acquisition_date')">取得日 <span class="sort-icon" id="sort-acquisition_date"></span></th>
+                                    <th class="sortable" onclick="sortAppoTable('member_name')">担当者 <span class="sort-icon" id="sort-member_name"></span></th>
+                                    <th class="sortable" onclick="sortAppoTable('project_name')">案件名 <span class="sort-icon" id="sort-project_name"></span></th>
+                                    <th class="sortable" onclick="sortAppoTable('customer_name')">顧客名 <span class="sort-icon" id="sort-customer_name"></span></th>
+                                    <th class="sortable" onclick="sortAppoTable('scheduled_date')">実施予定日 <span class="sort-icon" id="sort-scheduled_date"></span></th>
+                                    <th class="sortable text-right" onclick="sortAppoTable('amount')">金額 <span class="sort-icon" id="sort-amount"></span></th>
+                                    <th class="sortable" onclick="sortAppoTable('status')">ステータス <span class="sort-icon" id="sort-status"></span></th>
                                     <th>操作</th>
                                 </tr>
                             </thead>

@@ -22,6 +22,8 @@ let assignmentsData = [];
 let editingAssignmentId = null;
 let executionAppoData = []; // 当月実施予定のアポ（前月以前取得含む）
 let appoShowAll = false; // false=今日まで, true=全一覧
+let appoSortKey = 'scheduled_date'; // デフォルトソートキー
+let appoSortAsc = false; // false=降順
 
 // ==================== 初期化 ====================
 document.addEventListener('DOMContentLoaded', () => {
@@ -946,10 +948,29 @@ function renderAppointments() {
     // マージして表示。当月取得だがscheduled_dateが異なる月/NULLのアポも表示されるようにする。
     const execFiltered = filterAppointments(executionAppoData, filter);
     const acqFiltered = filterAppointments(appointmentsData, filter);
+    // IDベース + コンテンツベースの重複排除でマージ
     const seenIds = new Set(execFiltered.map(a => a.id));
-    const merged = [...execFiltered, ...acqFiltered.filter(a => !seenIds.has(a.id))];
-    // scheduled_date降順 → acquisition_date降順でソート
-    merged.sort((a, b) => (b.scheduled_date || '').localeCompare(a.scheduled_date || '') || (b.acquisition_date || '').localeCompare(a.acquisition_date || ''));
+    const seenKeys = new Set(execFiltered.map(a => `${a.member_name}|${a.project_name}|${a.acquisition_date}|${a.customer_name}`));
+    const merged = [...execFiltered];
+    acqFiltered.forEach(a => {
+        const key = `${a.member_name}|${a.project_name}|${a.acquisition_date}|${a.customer_name}`;
+        if (!seenIds.has(a.id) && !seenKeys.has(key)) {
+            merged.push(a);
+            seenKeys.add(key);
+        }
+    });
+    // ソート
+    merged.sort((a, b) => {
+        let va = a[appoSortKey] || '';
+        let vb = b[appoSortKey] || '';
+        if (appoSortKey === 'amount') {
+            va = a.amount || 0;
+            vb = b.amount || 0;
+            return appoSortAsc ? va - vb : vb - va;
+        }
+        const cmp = String(va).localeCompare(String(vb), 'ja');
+        return appoSortAsc ? cmp : -cmp;
+    });
     const allData = merged;
 
     // 今日までフィルタを適用してからサマリ計算
@@ -1073,6 +1094,20 @@ function filterAppoStatus(status) {
     document.querySelectorAll('.appo-status-tab').forEach(tab => {
         tab.classList.toggle('active', tab.dataset.status === status);
     });
+    renderAppointments();
+}
+
+function sortAppoTable(key) {
+    if (appoSortKey === key) {
+        appoSortAsc = !appoSortAsc;
+    } else {
+        appoSortKey = key;
+        appoSortAsc = true;
+    }
+    // ソートアイコン更新
+    document.querySelectorAll('.sort-icon').forEach(el => { el.textContent = ''; });
+    const icon = document.getElementById('sort-' + key);
+    if (icon) icon.textContent = appoSortAsc ? '▲' : '▼';
     renderAppointments();
 }
 
@@ -1485,6 +1520,16 @@ function renderProjects() {
         projectAppoCount[pn] = (projectAppoCount[pn] || 0) + 1;
     });
 
+    // 案件別の実績集計（アラート計算用）
+    const projectPerfStats = {};
+    performanceData.forEach(d => {
+        const pn = d.project_name;
+        if (!pn) return;
+        if (!projectPerfStats[pn]) projectPerfStats[pn] = { calls: 0, appo: 0 };
+        projectPerfStats[pn].calls += d.call_count || 0;
+        projectPerfStats[pn].appo += d.appointment_count || 0;
+    });
+
     // 案件カード
     let html = '';
     projectsData.forEach(p => {
@@ -1497,11 +1542,18 @@ function renderProjects() {
         const isOver = cap > 0 && actual >= cap;
         const barColor = isOver ? 'var(--primary-red)' : capRate > 80 ? '#ede07d' : 'var(--primary-blue)';
 
+        // アラート: 単価×架電toアポ率 < 7（架電100件以上）
+        const stats = projectPerfStats[p.project_name] || { calls: 0, appo: 0 };
+        const unitPrice = p.unit_price || 0;
+        const cta = stats.calls > 0 ? (stats.appo / stats.calls) : 0;
+        const alertScore = unitPrice * cta;
+        const hasAlert = stats.calls >= 100 && alertScore < 7;
+
         html += `
-            <div class="project-card" id="pcard-${pid}">
+            <div class="project-card" id="pcard-${pid}" ${hasAlert ? 'style="border-left:3px solid var(--primary-red);"' : ''}>
                 <div class="project-card-header">
                     <div>
-                        <div class="project-name">${p.project_name}</div>
+                        <div class="project-name">${p.project_name} ${hasAlert ? '<span style="color:var(--primary-red);font-size:0.8rem;">⚠ 収益性注意</span>' : ''}</div>
                         <div class="project-client">${p.client_name || '-'}</div>
                     </div>
                     <span class="kpi-badge good">${p.status}</span>
