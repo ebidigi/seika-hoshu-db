@@ -751,6 +751,8 @@ th.sortable:hover { background: var(--gray-200); }
 }
 
 /* ========== アポ確認管理 ========== */
+#appoTable td { white-space: nowrap; }
+#appoTable td:nth-child(4) { white-space: normal; }  /* 顧客名は折返し許可 */
 .appo-status-tabs {
     display: flex;
     gap: 8px;
