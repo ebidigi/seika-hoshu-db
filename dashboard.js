@@ -315,9 +315,7 @@ function closeModal(id) {
 
 // ==================== Initialization ====================
 document.addEventListener('DOMContentLoaded', () => {
-    const now = new Date();
-    const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-    document.getElementById('filterMonth').value = ym;
+    document.getElementById('filterMonth').value = '2026-04';
     loadAllData();
 });
 
