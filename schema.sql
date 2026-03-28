@@ -128,11 +128,24 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- チーム所属履歴（月次）
+CREATE TABLE IF NOT EXISTS member_team_history (
+  id TEXT PRIMARY KEY,
+  member_name TEXT NOT NULL,
+  team_name TEXT NOT NULL,
+  year_month TEXT NOT NULL,
+  UNIQUE(member_name, year_month)
+);
+CREATE INDEX IF NOT EXISTS idx_mth_ym ON member_team_history(year_month);
+CREATE INDEX IF NOT EXISTS idx_mth_member ON member_team_history(member_name);
+
 -- 初期データ: チーム
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('野口Team', '野口');
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('松居Team', '松居');
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('坪井Team', '坪井');
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('宮城Team', '宮城');
+INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('三善Team', '三善');
+INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('菊池Team', '菊池');
 
 -- 初期データ: メンバー
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('野口', '野口Team');
@@ -146,6 +159,8 @@ INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('坪井', '坪井
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('村松', '坪井Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中颯汰', '坪井Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('宮城', '宮城Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('三善', '三善Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('菊池', '菊池Team');
 
 -- 案件×メンバー アサイン管理（月次）
 CREATE TABLE IF NOT EXISTS project_member_assignments (
@@ -189,6 +204,17 @@ CREATE TABLE IF NOT EXISTS team_monthly_pl (
   memo TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- フィードバック/改修依頼
+CREATE TABLE IF NOT EXISTS feedback_requests (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT,
+  reporter TEXT,
+  status TEXT DEFAULT 'open',
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
 -- 初期データ: デフォルト設定

@@ -86,13 +86,17 @@ function sendSeikaSlackNotification() {
     const todayAppo = todayData.length > 0 ? (parseInt(todayData[0].appo) || 0) : 0;
     const todayAmount = todayData.length > 0 ? (parseInt(todayData[0].amount) || 0) : 0;
 
-    // チーム別集計
-    const teams = {
-      '野口Team': ['野口', '中村た', '田中か', '辻森'],
-      '松居Team': ['松居', '山本', '美除', '村上'],
-      '坪井Team': ['坪井', '村松', '田中颯汰'],
-      '宮城Team': ['宮城']
-    };
+    // チーム別集計（DBから動的取得）
+    var teamHistory = queryTurso(
+      "SELECT member_name, team_name FROM member_team_history WHERE year_month = ?",
+      [ym]
+    );
+    var teams = {};
+    teamHistory.forEach(function(h) {
+      if (h.team_name === '所属なし') return;
+      if (!teams[h.team_name]) teams[h.team_name] = [];
+      teams[h.team_name].push(h.member_name);
+    });
 
     let teamLines = '';
     for (var teamName in teams) {

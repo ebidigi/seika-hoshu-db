@@ -13,13 +13,29 @@ let teamsData = [];
 let projectsData = [];
 let targetsData = [];
 let settingsMap = {};
-let holidaysSet = new Set();
+// 2026年 日本の祝日（DB未登録時のフォールバック）
+const HOLIDAYS_2026 = [
+    '2026-01-01','2026-01-02','2026-01-12',
+    '2026-02-11','2026-02-23',
+    '2026-03-20',
+    '2026-04-29',
+    '2026-05-03','2026-05-04','2026-05-05','2026-05-06',
+    '2026-07-20',
+    '2026-08-11',
+    '2026-09-21','2026-09-22','2026-09-23',
+    '2026-10-12',
+    '2026-11-03','2026-11-23',
+];
+let holidaysSet = new Set(HOLIDAYS_2026);
 let charts = {};
 let currentAppoFilter = 'all';
 let currentAnalysisView = 'daily';
 let currentAnalysisChart = 'calls';
 let assignmentsData = [];
 let editingAssignmentId = null;
+let editingMemberId = null;
+let editingProjectId = null;
+let teamHistoryData = []; // member_team_history 全データ
 let executionAppoData = []; // 当月実施予定のアポ（前月以前取得含む）
 let appoShowAll = false; // false=今日まで, true=全一覧
 let appoSortKey = 'scheduled_date'; // デフォルトソートキー
@@ -104,7 +120,14 @@ const MEMBER_NAME_NORMALIZE = {
     '田中克樹': '田中か', '@田中克樹/katsuki tanaka': '田中か',
     '宮城 啓生': '宮城', '宮城啓生': '宮城', '@宮城 啓生/miyagi hiroki': '宮城', '宮城一平': '宮城', '@宮城一平': '宮城',
     '@田中颯汰/tanaka sota': '田中颯汰',
-    '村上夢果': '村上', '村上 夢果': '村上', '@村上夢果': '村上'
+    '村上夢果': '村上', '村上 夢果': '村上', '@村上夢果': '村上',
+    '三善一樹': '三善', '三善 一樹': '三善', '@三善一樹/miyoshi itsuki': '三善',
+    '菊池幸平': '菊池', '菊池 幸平': '菊池', '@菊池幸平/kikuchi kohei': '菊池',
+    '野上樹哉': '野上', '野上 樹哉': '野上', '@野上 樹哉/nogami jukiya': '野上',
+    '池田愛': '池田', '池田 愛': '池田', '@池田愛/ikeda ai': '池田',
+    '轟玲音': '轟', '轟 玲音': '轟',
+    '清水陸斗': '清水', '清水 陸斗': '清水',
+    '堀切友世': '堀切', '堀切 友世': '堀切'
 };
 
 function normalizeMemberName(name) {
@@ -126,6 +149,51 @@ function normalizeDataMemberNames(dataArray) {
     dataArray.forEach(d => {
         if (d.member_name) d.member_name = normalizeMemberName(d.member_name);
     });
+}
+
+// ==================== チーム月次解決 ====================
+// 指定月のメンバー→チーム マッピングを返す
+function getTeamsForMonth(ym) {
+    const monthHistory = teamHistoryData.filter(h => h.year_month === ym);
+    if (monthHistory.length === 0) {
+        // フォールバック: 現在の members.team_name を使用
+        const map = {};
+        membersData.forEach(m => { map[m.member_name] = m.team_name; });
+        return map;
+    }
+    const map = {};
+    monthHistory.forEach(h => { map[h.member_name] = h.team_name; });
+    return map;
+}
+
+// 指定月にアクティブなチーム名一覧
+function getActiveTeamNames(ym) {
+    const membership = getTeamsForMonth(ym);
+    return [...new Set(Object.values(membership))].filter(t => t !== '所属なし').sort();
+}
+
+// 指定月の特定チームに所属するメンバー名一覧
+function getTeamMembersForMonth(teamName, ym) {
+    const membership = getTeamsForMonth(ym);
+    return Object.entries(membership)
+        .filter(([_, team]) => team === teamName)
+        .map(([member, _]) => member);
+}
+
+// チームフィルタドロップダウンを動的に生成
+function populateTeamFilter() {
+    const ym = document.getElementById('filterMonth').value;
+    const select = document.getElementById('filterTeam');
+    const current = select.value;
+    select.innerHTML = '<option value="all">全体</option>';
+    getActiveTeamNames(ym).forEach(team => {
+        select.innerHTML += `<option value="${team}">${team}</option>`;
+    });
+    if ([...select.options].some(o => o.value === current)) {
+        select.value = current;
+    } else {
+        select.value = 'all';
+    }
 }
 
 function deduplicateAppointments(appoArray) {
@@ -165,7 +233,8 @@ async function loadAllData() {
             queryTurso("SELECT * FROM teams WHERE status = 'active'"),
             queryTurso("SELECT * FROM projects WHERE status = 'active' ORDER BY project_name"),
             queryTurso("SELECT * FROM settings"),
-            queryTurso("SELECT date FROM holidays")
+            queryTurso("SELECT date FROM holidays"),
+            queryTurso("SELECT * FROM member_team_history ORDER BY year_month, team_name, member_name")
         ]);
 
         membersData = results[0];
@@ -174,9 +243,14 @@ async function loadAllData() {
         settingsMap = {};
         results[3].forEach(s => { settingsMap[s.key] = s.value; });
         holidaysSet = new Set(results[4].map(h => h.date));
+        teamHistoryData = results[5];
 
-        console.log('Master data loaded:', membersData.length, 'members,', teamsData.length, 'teams,', projectsData.length, 'projects');
+        // DBの祝日をマージ（フォールバックのHOLIDAYS_2026に追加）
+        results[4].forEach(h => { if (h.date) holidaysSet.add(h.date); });
 
+        console.log('Master data loaded:', membersData.length, 'members,', teamsData.length, 'teams,', projectsData.length, 'projects,', holidaysSet.size, 'holidays,', teamHistoryData.length, 'team history');
+
+        populateTeamFilter();
         populateMemberFilter();
         populateDailyTargetMember();
 
@@ -294,7 +368,7 @@ function getFilters() {
 function filterPerformance(data, filter) {
     let result = data;
     if (filter.team !== 'all') {
-        const teamMembers = membersData.filter(m => m.team_name === filter.team).map(m => m.member_name);
+        const teamMembers = getTeamMembersForMonth(filter.team, filter.month);
         result = result.filter(d => teamMembers.includes(d.member_name));
     }
     if (filter.member !== 'all') {
@@ -306,7 +380,7 @@ function filterPerformance(data, filter) {
 function filterAppointments(data, filter) {
     let result = data;
     if (filter.team !== 'all') {
-        const teamMembers = membersData.filter(m => m.team_name === filter.team).map(m => m.member_name);
+        const teamMembers = getTeamMembersForMonth(filter.team, filter.month);
         result = result.filter(d => teamMembers.includes(d.member_name));
     }
     if (filter.member !== 'all') {
@@ -316,13 +390,19 @@ function filterAppointments(data, filter) {
 }
 
 function applyFilters() {
+    const ym = document.getElementById('filterMonth').value;
+
+    // 月変更時にチームフィルタを更新
+    populateTeamFilter();
+
     // チーム選択時にメンバーフィルターを更新
     const team = document.getElementById('filterTeam').value;
     const memberSelect = document.getElementById('filterMember');
     const currentMember = memberSelect.value;
 
     memberSelect.innerHTML = '<option value="all">全員</option>';
-    const filtered = team === 'all' ? membersData : membersData.filter(m => m.team_name === team);
+    const teamMembers = team === 'all' ? membersData.map(m => m.member_name) : getTeamMembersForMonth(team, ym);
+    const filtered = membersData.filter(m => teamMembers.includes(m.member_name));
     filtered.forEach(m => {
         memberSelect.innerHTML += `<option value="${m.member_name}">${displayName(m.member_name)}</option>`;
     });
@@ -414,10 +494,11 @@ function renderTodaySummary(appoData) {
     const maxMemberAmount = memberRanking.length > 0 ? memberRanking[0][1].total : 1;
 
     // チーム別集計
+    const ym = document.getElementById('filterMonth').value;
+    const memberTeamMap = getTeamsForMonth(ym);
     const teamMap = {};
     todayAppo.forEach(a => {
-        const member = membersData.find(m => m.member_name === a.member_name);
-        const team = member ? member.team_name : '不明';
+        const team = memberTeamMap[a.member_name] || '不明';
         if (!teamMap[team]) teamMap[team] = { total: 0, count: 0, projects: {} };
         teamMap[team].total += (a.amount || 0);
         teamMap[team].count++;
@@ -704,11 +785,11 @@ function renderOverview(perfData, appoData, execAppoData, filter) {
 function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
     const ym = document.getElementById('filterMonth').value;
 
-    const teamNames = ['野口Team', '坪井Team', '松居Team', '宮城Team'];
+    const teamNames = getActiveTeamNames(ym);
     let html = '<div class="team-grid">';
 
     teamNames.forEach(teamName => {
-        const teamMembers = membersData.filter(m => m.team_name === teamName).map(m => m.member_name);
+        const teamMembers = getTeamMembersForMonth(teamName, ym);
         const teamAppo = appoData.filter(d => teamMembers.includes(d.member_name));
         const teamExec = execAppoData.filter(d => teamMembers.includes(d.member_name));
 
@@ -797,7 +878,7 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
             <div class="member-card">
                 <div class="member-card-header">
                     <span class="member-name">${displayName(member.member_name)}</span>
-                    <span class="member-team-badge">${member.team_name}</span>
+                    <span class="member-team-badge">${getTeamsForMonth(ym)[member.member_name] || member.team_name}</span>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">
                     <div>
@@ -1169,7 +1250,7 @@ function renderYield(perfData, filter) {
     // 実施数（取得ベース: 当月取得アポのうち実施確定のもの）
     const filteredAcqAppo = filter.team !== 'all'
         ? appointmentsData.filter(a => {
-            const tm = membersData.filter(m => m.team_name === filter.team).map(m => m.member_name);
+            const tm = getTeamMembersForMonth(filter.team, filter.month);
             return tm.includes(a.member_name);
         })
         : filter.member !== 'all'
@@ -1221,8 +1302,9 @@ function renderYield(perfData, filter) {
     `;
 
     // メンバー/チーム別歩留まりテーブル
+    const teamMembersForYield = filter.team !== 'all' ? getTeamMembersForMonth(filter.team, filter.month) : null;
     const entities = filter.team !== 'all'
-        ? membersData.filter(m => m.team_name === filter.team)
+        ? membersData.filter(m => teamMembersForYield.includes(m.member_name))
         : filter.member !== 'all'
             ? membersData.filter(m => m.member_name === filter.member)
             : membersData;
@@ -1556,7 +1638,15 @@ function renderProjects() {
                         <div class="project-name">${p.project_name} ${hasAlert ? '<span style="color:var(--primary-red);font-size:0.8rem;">⚠ 収益性注意</span>' : ''}</div>
                         <div class="project-client">${p.client_name || '-'}</div>
                     </div>
-                    <span class="kpi-badge good">${p.status}</span>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <button class="project-edit-btn" onclick="openProjectForm('${p.id}')" title="編集">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                        </button>
+                        <span class="kpi-badge good">${p.status}</span>
+                    </div>
                 </div>
                 <div class="project-cap-section">
                     <div class="project-cap-header">
@@ -1712,7 +1802,7 @@ function renderAssignments() {
     let filtered = assignmentsData.slice();
 
     if (filter.team !== 'all') {
-        const teamMembers = membersData.filter(m => m.team_name === filter.team).map(m => m.member_name);
+        const teamMembers = getTeamMembersForMonth(filter.team, filter.month);
         filtered = filtered.filter(a => teamMembers.includes(a.member_name));
     }
     if (filter.member !== 'all') {
@@ -2221,7 +2311,7 @@ function renderSettings() {
     `;
 
     // チーム目標
-    ['野口Team', '松居Team', '坪井Team', '宮城Team'].forEach(team => {
+    getActiveTeamNames(ym).forEach(team => {
         const t = getTarget('team', team, ym);
         acqHtml += `
             <div class="settings-item">
@@ -2270,7 +2360,8 @@ function renderSettings() {
                 <td>${displayName(m.member_name)}</td>
                 <td>${m.team_name}</td>
                 <td><span class="status-badge status-executed">${m.status}</span></td>
-                <td>
+                <td style="display:flex;gap:4px;">
+                    <button class="status-btn" onclick="openMemberForm('${m.id}')">編集</button>
                     <button class="status-btn" onclick="toggleMemberStatus('${m.id}','${m.status === 'active' ? 'inactive' : 'active'}')">
                         ${m.status === 'active' ? '無効化' : '有効化'}
                     </button>
@@ -2317,7 +2408,7 @@ async function saveTargets() {
         await upsertTarget('total', 'all', ym, totalVal, totalExec);
 
         // チーム目標
-        for (const team of ['野口Team', '松居Team', '坪井Team', '宮城Team']) {
+        for (const team of getActiveTeamNames(ym)) {
             const val = parseInt(document.getElementById(`target_team_${team}`).value) || 0;
             const execVal = parseInt(document.getElementById(`target_team_${team}_exec`).value) || 0;
             await upsertTarget('team', team, ym, val, execVal);
@@ -2439,18 +2530,34 @@ async function saveRateSettings() {
 }
 
 // ==================== 案件フォーム ====================
-function openProjectForm() {
+function openProjectForm(projectId) {
+    editingProjectId = projectId || null;
     document.getElementById('projectFormModal').classList.remove('hidden');
-    document.getElementById('projFormName').value = '';
-    document.getElementById('projFormClient').value = '';
-    document.getElementById('projFormUnitPrice').value = '';
-    document.getElementById('projFormCapCount').value = '';
-    document.getElementById('projFormCapAmount').value = '';
-    document.getElementById('projFormListUrl').value = '';
+    document.getElementById('projectFormTitle').textContent = editingProjectId ? '案件編集' : '新規案件追加';
+
+    if (editingProjectId) {
+        const p = projectsData.find(x => x.id === editingProjectId);
+        if (p) {
+            document.getElementById('projFormName').value = p.project_name || '';
+            document.getElementById('projFormClient').value = p.client_name || '';
+            document.getElementById('projFormUnitPrice').value = p.unit_price || '';
+            document.getElementById('projFormCapCount').value = p.monthly_cap_count || '';
+            document.getElementById('projFormCapAmount').value = p.monthly_cap_amount || '';
+            document.getElementById('projFormListUrl').value = p.call_list_url || '';
+        }
+    } else {
+        document.getElementById('projFormName').value = '';
+        document.getElementById('projFormClient').value = '';
+        document.getElementById('projFormUnitPrice').value = '';
+        document.getElementById('projFormCapCount').value = '';
+        document.getElementById('projFormCapAmount').value = '';
+        document.getElementById('projFormListUrl').value = '';
+    }
 }
 
 function closeProjectForm() {
     document.getElementById('projectFormModal').classList.add('hidden');
+    editingProjectId = null;
 }
 
 async function submitProjectForm() {
@@ -2458,55 +2565,114 @@ async function submitProjectForm() {
     if (!name) return;
 
     try {
-        await executeTurso(
-            `INSERT INTO projects (id, project_name, client_name, unit_price, monthly_cap_count, monthly_cap_amount, call_list_url)
-             VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)`,
-            [
-                name,
-                document.getElementById('projFormClient').value || null,
-                parseInt(document.getElementById('projFormUnitPrice').value) || 0,
-                parseInt(document.getElementById('projFormCapCount').value) || null,
-                parseInt(document.getElementById('projFormCapAmount').value) || null,
-                document.getElementById('projFormListUrl').value || null
-            ]
-        );
+        if (editingProjectId) {
+            await executeTurso(
+                `UPDATE projects SET project_name = ?, client_name = ?, unit_price = ?, monthly_cap_count = ?, monthly_cap_amount = ?, call_list_url = ?, updated_at = datetime('now') WHERE id = ?`,
+                [
+                    name,
+                    document.getElementById('projFormClient').value || null,
+                    parseInt(document.getElementById('projFormUnitPrice').value) || 0,
+                    parseInt(document.getElementById('projFormCapCount').value) || null,
+                    parseInt(document.getElementById('projFormCapAmount').value) || null,
+                    document.getElementById('projFormListUrl').value || null,
+                    editingProjectId
+                ]
+            );
+            showToast('案件を更新しました');
+        } else {
+            await executeTurso(
+                `INSERT INTO projects (id, project_name, client_name, unit_price, monthly_cap_count, monthly_cap_amount, call_list_url)
+                 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)`,
+                [
+                    name,
+                    document.getElementById('projFormClient').value || null,
+                    parseInt(document.getElementById('projFormUnitPrice').value) || 0,
+                    parseInt(document.getElementById('projFormCapCount').value) || null,
+                    parseInt(document.getElementById('projFormCapAmount').value) || null,
+                    document.getElementById('projFormListUrl').value || null
+                ]
+            );
+            showToast('案件を追加しました');
+        }
 
         closeProjectForm();
         projectsData = await queryTurso("SELECT * FROM projects WHERE status = 'active' ORDER BY project_name");
         renderProjects();
     } catch (error) {
-        alert('案件の追加に失敗しました: ' + error.message);
+        alert((editingProjectId ? '案件の更新' : '案件の追加') + 'に失敗しました: ' + error.message);
     }
 }
 
 // ==================== メンバーフォーム ====================
-function openMemberForm() {
+function openMemberForm(memberId) {
+    editingMemberId = memberId || null;
     document.getElementById('memberFormModal').classList.remove('hidden');
-    document.getElementById('memberFormName').value = '';
+    document.getElementById('memberFormTitle').textContent = editingMemberId ? 'メンバー編集' : 'メンバー追加';
+
+    // チームドロップダウンを動的生成
+    const teamSelect = document.getElementById('memberFormTeam');
+    teamSelect.innerHTML = '';
+    teamsData.filter(t => t.status === 'active').forEach(t => {
+        teamSelect.innerHTML += `<option value="${t.team_name}">${t.team_name}</option>`;
+    });
+
+    if (editingMemberId) {
+        const m = membersData.find(x => x.id === editingMemberId);
+        if (m) {
+            document.getElementById('memberFormName').value = m.member_name;
+            document.getElementById('memberFormDisplayName').value = m.display_name || '';
+            document.getElementById('memberFormTeam').value = m.team_name;
+        }
+    } else {
+        document.getElementById('memberFormName').value = '';
+        document.getElementById('memberFormDisplayName').value = '';
+    }
 }
 
 function closeMemberForm() {
     document.getElementById('memberFormModal').classList.add('hidden');
+    editingMemberId = null;
 }
 
 async function submitMemberForm() {
     const name = document.getElementById('memberFormName').value;
+    const displayNameVal = document.getElementById('memberFormDisplayName').value || null;
     const team = document.getElementById('memberFormTeam').value;
     if (!name || !team) return;
 
     try {
+        if (editingMemberId) {
+            await executeTurso(
+                "UPDATE members SET member_name = ?, display_name = ?, team_name = ? WHERE id = ?",
+                [name, displayNameVal, team, editingMemberId]
+            );
+            showToast('メンバーを更新しました');
+        } else {
+            await executeTurso(
+                "INSERT INTO members (id, member_name, display_name, team_name) VALUES (lower(hex(randomblob(16))), ?, ?, ?)",
+                [name, displayNameVal, team]
+            );
+            showToast('メンバーを追加しました');
+        }
+
+        // 当月の team_history も更新
+        const currentYM = document.getElementById('filterMonth').value;
         await executeTurso(
-            "INSERT INTO members (id, member_name, team_name) VALUES (lower(hex(randomblob(16))), ?, ?)",
-            [name, team]
+            `INSERT INTO member_team_history (id, member_name, team_name, year_month)
+             VALUES (lower(hex(randomblob(16))), ?, ?, ?)
+             ON CONFLICT(member_name, year_month) DO UPDATE SET team_name = excluded.team_name`,
+            [name, team, currentYM]
         );
 
         closeMemberForm();
         membersData = await queryTurso("SELECT * FROM members WHERE status = 'active' ORDER BY team_name, member_name");
+        teamHistoryData = await queryTurso("SELECT * FROM member_team_history ORDER BY year_month, team_name, member_name");
+        populateTeamFilter();
         populateMemberFilter();
         populateDailyTargetMember();
         renderSettings();
     } catch (error) {
-        alert('メンバーの追加に失敗しました: ' + error.message);
+        alert((editingMemberId ? 'メンバーの更新' : 'メンバーの追加') + 'に失敗しました: ' + error.message);
     }
 }
 
@@ -2650,4 +2816,85 @@ function escapeHtml(str) {
 function displayName(memberName) {
     const member = membersData.find(m => m.member_name === memberName);
     return (member && member.display_name) ? member.display_name : memberName;
+}
+
+// ==================== フィードバック/改修依頼 ====================
+const FEEDBACK_SLACK_CHANNEL = 'C0ACA4Q05PB';
+const FEEDBACK_MENTION_IDS = ['U043X21F2GL', 'U06DWC2HFBN']; // 海老根, 菊池
+
+function openFeedbackModal() {
+    document.getElementById('feedbackModal').classList.remove('hidden');
+    document.getElementById('feedbackType').value = 'バグ報告';
+    document.getElementById('feedbackTitle').value = '';
+    document.getElementById('feedbackDetail').value = '';
+    document.getElementById('feedbackSubmitBtn').disabled = false;
+    document.getElementById('feedbackSubmitBtn').textContent = '送信';
+
+    // 報告者プルダウンをメンバーから生成
+    const sel = document.getElementById('feedbackReporter');
+    sel.innerHTML = '<option value="">選択してください</option>';
+    membersData.forEach(m => {
+        sel.innerHTML += `<option value="${m.member_name}">${displayName(m.member_name)}</option>`;
+    });
+}
+
+function closeFeedbackModal() {
+    document.getElementById('feedbackModal').classList.add('hidden');
+}
+
+async function submitFeedback() {
+    const type = document.getElementById('feedbackType').value;
+    const title = document.getElementById('feedbackTitle').value;
+    const detail = document.getElementById('feedbackDetail').value;
+    const reporter = document.getElementById('feedbackReporter').value;
+    if (!title) return;
+
+    const btn = document.getElementById('feedbackSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = '送信中...';
+
+    // Slack メンション
+    const mentions = FEEDBACK_MENTION_IDS.map(id => `<@${id}>`).join(' ');
+    const reporterText = reporter ? `報告者: ${reporter}` : '報告者: 未選択';
+
+    const slackText = `${mentions}\n:mega: *【チーム900 DB】${type}*\n\n*${title}*\n${detail ? '\n' + detail + '\n' : ''}\n${reporterText}`;
+
+    try {
+        // Slack Webhook経由で送信（GAS proxy）
+        await sendFeedbackToSlack(slackText);
+        closeFeedbackModal();
+        showToast('改修依頼を送信しました');
+    } catch (error) {
+        btn.disabled = false;
+        btn.textContent = '送信';
+        showToast('送信に失敗しました: ' + error.message, true);
+    }
+}
+
+async function sendFeedbackToSlack(text) {
+    // Turso の settings テーブルに一旦保存（履歴として）
+    await executeTurso(
+        `INSERT INTO feedback_requests (id, type, title, detail, reporter, created_at)
+         VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, datetime('now'))`,
+        [
+            document.getElementById('feedbackType').value,
+            document.getElementById('feedbackTitle').value,
+            document.getElementById('feedbackDetail').value || null,
+            document.getElementById('feedbackReporter').value || null
+        ]
+    );
+
+    // Slack API で送信（CORS制約があるのでGAS proxyを使う）
+    const gasUrl = 'https://script.google.com/macros/s/AKfycbwv2aCYMB7z7OHxqVArBnuyDPCj1-VB9-gBBvXjvw76kGxfcvq1VjzLgxMdJMGdOZJp/exec';
+    const res = await fetch(gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'sendSlackFeedback',
+            channel: FEEDBACK_SLACK_CHANNEL,
+            text: text
+        })
+    });
+
+    if (!res.ok) throw new Error('Slack送信に失敗しました');
 }

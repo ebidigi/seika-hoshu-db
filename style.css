@@ -142,6 +142,8 @@ body {
     overflow-y: auto;
     transition: width 0.2s;
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .sidebar.collapsed {
@@ -1775,6 +1777,56 @@ th.sortable:hover { background: var(--gray-200); }
     .cap-summary-grid {
         grid-template-columns: repeat(2, 1fr);
     }
+}
+
+/* ========== サイドバーフィードバックボタン ========== */
+.sidebar-bottom {
+    margin-top: auto;
+    padding: 12px 8px 4px;
+    border-top: 1px solid var(--border-color);
+}
+
+.sidebar-feedback-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px dashed var(--border-color);
+    background: none;
+    cursor: pointer;
+    border-radius: 8px;
+    color: var(--text-light);
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+
+.sidebar-feedback-btn:hover {
+    background: var(--gray-100);
+    color: var(--text-dark);
+    border-color: var(--text-light);
+}
+
+/* ========== 案件編集ボタン ========== */
+.project-edit-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-white);
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-light);
+    transition: all 0.15s;
+}
+
+.project-edit-btn:hover {
+    background: var(--blue-50);
+    color: var(--primary-blue);
+    border-color: var(--primary-blue);
 }
 
 /* ========== 印刷 ========== */

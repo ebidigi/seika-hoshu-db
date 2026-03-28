@@ -46,6 +46,35 @@ function doGet(e) {
 }
 
 /**
+ * POST リクエストハンドラ（フィードバック送信など）
+ */
+function doPost(e) {
+  try {
+    var body = JSON.parse(e.postData.contents);
+    var result;
+
+    switch (body.action) {
+      case 'sendSlackFeedback':
+        sendSlackNotificationSeika(body.text, body.channel || null);
+        result = { status: 'ok', message: 'Feedback sent to Slack' };
+        break;
+
+      default:
+        result = { error: 'Unknown action: ' + body.action };
+    }
+
+    return ContentService
+      .createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: error.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
  * トリガーセットアップ（初回のみ実行）
  */
 function setupTriggersSeika() {

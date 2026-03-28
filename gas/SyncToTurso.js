@@ -352,24 +352,46 @@ function upsertAppointmentBatch(rows) {
  * 正規名: 野口, 中村た, 田中か, 辻森, 松居, 山本, 美除, 坪井, 村松, 田中颯汰, 宮城
  */
 function cleanupNonCanonicalNames() {
-  var canonicalNames = ['野口', '中村た', '田中か', '辻森', '松居', '山本', '美除', '村上', '坪井', '村松', '田中颯汰', '宮城'];
+  // DBからアクティブメンバーを取得（動的）
+  var dbMembers = [];
+  try {
+    dbMembers = queryTurso("SELECT member_name FROM members WHERE status = 'active'").map(function(r) { return r.member_name; });
+  } catch (e) {
+    Logger.log('canonicalNames fallback: ' + e.message);
+  }
+  var canonicalNames = dbMembers.length > 0 ? dbMembers : ['野口', '中村た', '田中か', '辻森', '松居', '山本', '美除', '村上', '坪井', '村松', '田中颯汰', '宮城', '菊池', '三善'];
   var inClause = canonicalNames.map(function(n) { return "'" + n + "'"; }).join(',');
 
-  // Step 1: 非正規名の行を取得
+  // Step 1: 両テーブルから非正規名を取得
   var checkResult;
   try {
-    checkResult = executeTursoPipeline([{
-      type: 'execute',
-      stmt: { sql: "SELECT DISTINCT member_name FROM performance_rawdata WHERE member_name NOT IN (" + inClause + ")" }
-    }]);
+    checkResult = executeTursoPipeline([
+      {
+        type: 'execute',
+        stmt: { sql: "SELECT DISTINCT member_name FROM performance_rawdata WHERE member_name NOT IN (" + inClause + ")" }
+      },
+      {
+        type: 'execute',
+        stmt: { sql: "SELECT DISTINCT member_name FROM appointments WHERE member_name NOT IN (" + inClause + ")" }
+      }
+    ]);
   } catch (e) {
     Logger.log('クリーンアップチェックエラー: ' + e.message);
     return;
   }
 
-  var nonCanonRows = checkResult.results && checkResult.results[0] && checkResult.results[0].type === 'ok'
-    ? (checkResult.results[0].response.result.rows || [])
-    : [];
+  // 両テーブルの非正規名をマージ（重複排除）
+  var nameSet = {};
+  for (var t = 0; t < 2; t++) {
+    var rows = checkResult.results && checkResult.results[t] && checkResult.results[t].type === 'ok'
+      ? (checkResult.results[t].response.result.rows || [])
+      : [];
+    for (var r = 0; r < rows.length; r++) {
+      var name = rows[r][0] && rows[r][0].value !== undefined ? rows[r][0].value : rows[r][0];
+      if (name) nameSet[name] = true;
+    }
+  }
+  var nonCanonRows = Object.keys(nameSet).map(function(n) { return [n]; });
 
   if (nonCanonRows.length === 0) return;
 

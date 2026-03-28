@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DigiMan チーム900 | CROダッシュボード</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+    <!-- ローディングオーバーレイ -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <div class="loading-text">データを読み込んでいます...</div>
+    </div>
+
+    <!-- トースト -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- ヘッダー -->
+    <header class="top-header">
+        <div class="header-left">
+            <span class="logo-text">DigiMan</span>
+            <span class="logo-sub">チーム900</span>
+        </div>
+        <div class="header-center">
+            <input type="month" id="filterMonth" onchange="onMonthChange()">
+            <button class="refresh-btn" id="refreshBtn" onclick="refreshData()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                </svg>
+                更新
+            </button>
+        </div>
+        <div class="header-right">
+            <span class="last-updated" id="lastUpdated"></span>
+            <button class="icon-btn" onclick="openSettingsModal()" title="設定" aria-label="設定を開く">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                </svg>
+            </button>
+            <button class="icon-btn feedback-trigger" onclick="openFeedbackModal()" title="改修依頼・バグ報告" aria-label="改修依頼・バグ報告">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- メインナビゲーション（タブ） -->
+    <nav class="main-nav">
+        <button class="nav-tab active" data-page="summary" onclick="switchPage('summary')">サマリ</button>
+        <button class="nav-tab" data-page="team-kikuchi" onclick="switchPage('team-kikuchi')">菊池Team</button>
+        <button class="nav-tab" data-page="team-miyoshi" onclick="switchPage('team-miyoshi')">三善Team</button>
+    </nav>
+
+    <!-- メインコンテンツ -->
+    <main class="main-content">
+        <!-- ====== サマリページ ====== -->
+        <div class="page" id="page-summary">
+            <!-- 全体KPIバー -->
+            <div class="kpi-bar" id="summaryKpiBar"></div>
+            <!-- チーム比較テーブル -->
+            <div class="card" id="summaryComparisonCard">
+                <div class="card-header"><h2>チーム比較</h2></div>
+                <div class="card-body table-scroll">
+                    <table class="data-table" id="summaryComparisonTable"></table>
+                </div>
+            </div>
+            <!-- アポステータスサマリ -->
+            <div class="card" id="summaryAppoStatusCard">
+                <div class="card-header"><h2>アポステータス</h2></div>
+                <div class="card-body table-scroll">
+                    <table class="data-table" id="summaryAppoStatusTable"></table>
+                </div>
+            </div>
+            <!-- メンバーランキング -->
+            <div class="card" id="summaryRankingCard">
+                <div class="card-header"><h2>メンバーランキング</h2></div>
+                <div class="card-body table-scroll">
+                    <table class="data-table" id="summaryRankingTable"></table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== 菊池Team ====== -->
+        <div class="page hidden" id="page-team-kikuchi">
+            <div class="team-sub-tabs" id="kikuchiSubTabs">
+                <button class="sub-tab active" data-sub="overview" onclick="switchSubTab('kikuchi','overview')">概要</button>
+                <button class="sub-tab" data-sub="appointments" onclick="switchSubTab('kikuchi','appointments')">アポ確認</button>
+                <button class="sub-tab" data-sub="projects" onclick="switchSubTab('kikuchi','projects')">案件管理</button>
+                <button class="sub-tab" data-sub="analysis" onclick="switchSubTab('kikuchi','analysis')">歩留まり・分析</button>
+            </div>
+            <div class="sub-page" id="kikuchi-overview"></div>
+            <div class="sub-page hidden" id="kikuchi-appointments"></div>
+            <div class="sub-page hidden" id="kikuchi-projects"></div>
+            <div class="sub-page hidden" id="kikuchi-analysis"></div>
+        </div>
+
+        <!-- ====== 三善Team ====== -->
+        <div class="page hidden" id="page-team-miyoshi">
+            <div class="team-sub-tabs" id="miyoshiSubTabs">
+                <button class="sub-tab active" data-sub="overview" onclick="switchSubTab('miyoshi','overview')">概要</button>
+                <button class="sub-tab" data-sub="appointments" onclick="switchSubTab('miyoshi','appointments')">アポ確認</button>
+                <button class="sub-tab" data-sub="projects" onclick="switchSubTab('miyoshi','projects')">案件管理</button>
+                <button class="sub-tab" data-sub="analysis" onclick="switchSubTab('miyoshi','analysis')">歩留まり・分析</button>
+            </div>
+            <div class="sub-page" id="miyoshi-overview"></div>
+            <div class="sub-page hidden" id="miyoshi-appointments"></div>
+            <div class="sub-page hidden" id="miyoshi-projects"></div>
+            <div class="sub-page hidden" id="miyoshi-analysis"></div>
+        </div>
+    </main>
+
+    <!-- ====== 設定モーダル ====== -->
+    <div class="modal-overlay hidden" id="settingsModal">
+        <div class="modal" style="max-width:700px;">
+            <div class="modal-header">
+                <h3>設定</h3>
+                <button class="modal-close" onclick="closeModal('settingsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-tabs">
+                    <button class="settings-tab active" data-tab="teamTargets" onclick="switchSettingsTab('teamTargets')">チーム目標</button>
+                    <button class="settings-tab" data-tab="memberTargets" onclick="switchSettingsTab('memberTargets')">メンバー目標</button>
+                    <button class="settings-tab" data-tab="memberMgmt" onclick="switchSettingsTab('memberMgmt')">メンバー管理</button>
+                </div>
+                <div id="settingsContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== フィードバックモーダル ====== -->
+    <div class="modal-overlay hidden" id="feedbackModal">
+        <div class="modal" style="max-width:520px;">
+            <div class="modal-header">
+                <h3>改修依頼・バグ報告</h3>
+                <button class="modal-close" onclick="closeModal('feedbackModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="feedbackType">種別</label>
+                    <select id="feedbackType">
+                        <option value="バグ報告">バグ報告</option>
+                        <option value="改修依頼">改修依頼</option>
+                        <option value="機能要望">機能要望</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="feedbackReporter">報告者</label>
+                    <select id="feedbackReporter"></select>
+                </div>
+                <div class="form-group">
+                    <label for="feedbackTitle">タイトル</label>
+                    <input type="text" id="feedbackTitle" placeholder="概要を簡潔に">
+                </div>
+                <div class="form-group">
+                    <label for="feedbackDetail">詳細</label>
+                    <textarea id="feedbackDetail" rows="4" placeholder="再現手順や詳細を記載してください"></textarea>
+                </div>
+                <button class="btn btn-primary" id="feedbackSubmitBtn" onclick="submitFeedback()">送信</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== アサインメント編集モーダル ====== -->
+    <div class="modal-overlay hidden" id="assignmentModal">
+        <div class="modal" style="max-width:600px;">
+            <div class="modal-header">
+                <h3 id="assignmentModalTitle">アサインメント追加</h3>
+                <button class="modal-close" onclick="closeModal('assignmentModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="asgMember">メンバー</label>
+                        <select id="asgMember"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="asgProject">案件</label>
+                        <select id="asgProject"></select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="asgType">タイプ</label>
+                        <select id="asgType">
+                            <option value="メイン">メイン</option>
+                            <option value="サブ">サブ</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="asgPm">PM</label>
+                        <input type="text" id="asgPm" placeholder="PM名">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="asgCapCount">キャップ数</label>
+                        <input type="number" id="asgCapCount" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="asgCapAmount">キャップ金額</label>
+                        <input type="number" id="asgCapAmount" min="0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="asgTargetCount">目標数</label>
+                        <input type="number" id="asgTargetCount" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="asgSheetUrl">シートURL</label>
+                        <input type="url" id="asgSheetUrl" placeholder="https://...">
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                    <button class="btn btn-secondary" onclick="closeModal('assignmentModal')">キャンセル</button>
+                    <button class="btn btn-primary" id="assignmentSaveBtn" onclick="saveAssignment()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

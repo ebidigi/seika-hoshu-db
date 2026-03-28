@@ -12,12 +12,28 @@ const SEIKA_CONFIG = {
   SLACK_CHANNEL: 'C0ACA4Q05PB'
 };
 
-// 成果報酬チームメンバー一覧
-const SEIKA_MEMBERS = [
+// 成果報酬チームメンバー一覧（DB動的取得 + フォールバック）
+var _cachedSeikaMembers = null;
+function getSeikaMembers() {
+  if (_cachedSeikaMembers) return _cachedSeikaMembers;
+  try {
+    var rows = queryTurso("SELECT member_name FROM members WHERE status = 'active'");
+    _cachedSeikaMembers = rows.map(function(r) { return r.member_name; });
+    // 正規化マップの値も含める（スプレッドシートのフルネームでマッチさせるため）
+    var mapKeys = Object.keys(MEMBER_NAME_MAP);
+    _cachedSeikaMembers = _cachedSeikaMembers.concat(mapKeys);
+    return _cachedSeikaMembers;
+  } catch (e) {
+    Logger.log('getSeikaMembers fallback: ' + e.message);
+    // フォールバック
+    return SEIKA_MEMBERS_FALLBACK;
+  }
+}
+const SEIKA_MEMBERS_FALLBACK = [
   '野口', '中村 峻也', '田中克樹', '辻森',
   '松居', '山本', '美除', '村上夢果',
   '坪井', '村松', '田中颯汰',
-  '宮城 啓生'
+  '宮城 啓生', '菊池幸平', '三善一樹'
 ];
 
 // スプレッドシート名 → DB正規名マッピング
@@ -45,7 +61,23 @@ const MEMBER_NAME_MAP = {
   '美除直生': '美除',
   '美除 直生': '美除',
   '村上夢果': '村上',
-  '村上 夢果': '村上'
+  '村上 夢果': '村上',
+  '三善一樹': '三善',
+  '三善 一樹': '三善',
+  '菊池幸平': '菊池',
+  '菊池 幸平': '菊池',
+  '野上樹哉': '野上',
+  '野上 樹哉': '野上',
+  '池田愛': '池田',
+  '池田 愛': '池田',
+  '轟玲音': '轟',
+  '轟 玲音': '轟',
+  '清水陸斗': '清水',
+  '清水 陸斗': '清水',
+  '堀切友世': '堀切',
+  '堀切 友世': '堀切',
+  '田端音藍': 'タバタ',
+  '田端 音藍': 'タバタ'
 };
 
 // スプレッドシート案件名 → DB正規名マッピング
@@ -215,11 +247,12 @@ function isBusinessHoursSeika() {
 function isSeikaTeamMember(name) {
   if (!name) return false;
   const raw = String(name).trim();
+  var members = getSeikaMembers();
   // 元名でマッチ
-  if (SEIKA_MEMBERS.some(m => raw.includes(m))) return true;
+  if (members.some(function(m) { return raw.includes(m); })) return true;
   // 正規化名でマッチ
   const normalized = normalizeMemberName(raw);
-  return SEIKA_MEMBERS.some(m => normalized.includes(m));
+  return members.some(function(m) { return normalized.includes(m); });
 }
 
 /**
