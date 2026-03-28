@@ -702,11 +702,25 @@ function renderTeamOverview(teamKey, teamName, ym, members, perf, appo, execAppo
                     </div>
                     <div style="text-align:right;font-size:0.72rem;color:var(--text-light);margin-top:2px;">${mAchievement}%</div>
                 </div>` : ''}
+                <div class="mc-divider"></div>
                 <div class="mc-row">
                     <span class="mc-label">実施確定</span>
                     <span class="mc-value">${formatYen(mExecAmount)}</span>
                 </div>
-                ${mExecTarget > 0 ? `<div class="mc-row"><span class="mc-label">実施目標</span><span class="mc-value" style="font-size:0.78rem;color:var(--text-light);">${formatYen(mExecTarget)}</span></div>` : ''}
+                <div class="mc-row">
+                    <span class="mc-label">実施目標</span>
+                    <span class="mc-value" style="font-size:0.78rem;color:var(--text-light);">${mExecTarget > 0 ? formatYen(mExecTarget) : '-'}</span>
+                </div>
+                ${mExecTarget > 0 ? (() => {
+                    const execAchieve = Math.round(mExecAmount / mExecTarget * 1000) / 10;
+                    return `
+                <div class="mc-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill ${progressColor(execAchieve)}" style="width:${Math.min(execAchieve, 100)}%"></div>
+                    </div>
+                    <div style="text-align:right;font-size:0.72rem;color:var(--text-light);margin-top:2px;">${execAchieve}%</div>
+                </div>`;
+                })() : ''}
             </div>
         `;
     });

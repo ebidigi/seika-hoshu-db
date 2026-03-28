@@ -558,6 +558,11 @@ body {
     margin: 8px 0;
 }
 
+.member-card .mc-divider {
+    border-top: 1px solid var(--border-color);
+    margin: 8px 0;
+}
+
 .member-card .mc-stats {
     display: flex;
     gap: 12px;
