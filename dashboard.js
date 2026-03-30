@@ -737,9 +737,17 @@ function renderTeamAppointments(teamKey, teamName, ym, members, appo, execAppo) 
     // Merge and dedup
     const allAppo = deduplicateAppointments([...appo, ...execAppo]);
 
-    // Status counts
+    // Status counts & amounts
     const statusCounts = { all: allAppo.length, '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
-    allAppo.forEach(a => { if (statusCounts[a.status] !== undefined) statusCounts[a.status]++; });
+    const statusAmounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
+    allAppo.forEach(a => {
+        if (statusCounts[a.status] !== undefined) {
+            statusCounts[a.status]++;
+            statusAmounts[a.status] += a.amount || 0;
+        }
+    });
+    const totalAmount = statusAmounts['実施'] + statusAmounts['リスケ'] + statusAmounts['キャンセル'] + statusAmounts['未確認'];
+    const total = allAppo.length;
 
     // Filter
     let filtered = allAppo;
@@ -776,6 +784,11 @@ function renderTeamAppointments(teamKey, teamName, ym, members, appo, execAppo) 
         return `<span class="sort-icon ${active ? 'active' : ''}">${arrow}</span>`;
     }
 
+    const execRate = total > 0 ? (statusCounts['実施'] / total * 100).toFixed(1) : '0.0';
+    const rescheduleRate = total > 0 ? (statusCounts['リスケ'] / total * 100).toFixed(1) : '0.0';
+    const cancelRate = total > 0 ? (statusCounts['キャンセル'] / total * 100).toFixed(1) : '0.0';
+    const unconfirmedRate = total > 0 ? (statusCounts['未確認'] / total * 100).toFixed(1) : '0.0';
+
     let html = `
         <div class="appo-summary-bar">
             <div class="appo-summary-item">
@@ -797,6 +810,34 @@ function renderTeamAppointments(teamKey, teamName, ym, members, appo, execAppo) 
             <div class="appo-summary-item">
                 <span class="status-badge cancelled">キャンセル</span>
                 <span class="asi-count">${statusCounts['キャンセル']}</span>
+            </div>
+        </div>
+
+        <div class="appo-amount-summary" style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:12px 0;">
+            <div style="background:var(--bg-light,#f8f9fa);border-radius:8px;padding:10px 12px;text-align:center;">
+                <div style="font-size:0.7rem;color:var(--text-muted,#999);">総金額</div>
+                <div style="font-size:0.95rem;font-weight:700;">${formatYen(totalAmount)}</div>
+                <div style="font-size:0.7rem;color:var(--text-muted,#999);">${total}件</div>
+            </div>
+            <div style="background:var(--bg-light,#f8f9fa);border-radius:8px;padding:10px 12px;text-align:center;">
+                <div style="font-size:0.7rem;color:#2563eb;">実施確定</div>
+                <div style="font-size:0.95rem;font-weight:700;color:#2563eb;">${formatYen(statusAmounts['実施'])}</div>
+                <div style="font-size:0.7rem;color:var(--text-muted,#999);">${statusCounts['実施']}件 (${execRate}%)</div>
+            </div>
+            <div style="background:var(--bg-light,#f8f9fa);border-radius:8px;padding:10px 12px;text-align:center;">
+                <div style="font-size:0.7rem;color:#a16207;">リスケ</div>
+                <div style="font-size:0.95rem;font-weight:700;color:#a16207;">${formatYen(statusAmounts['リスケ'])}</div>
+                <div style="font-size:0.7rem;color:var(--text-muted,#999);">${statusCounts['リスケ']}件 (${rescheduleRate}%)</div>
+            </div>
+            <div style="background:var(--bg-light,#f8f9fa);border-radius:8px;padding:10px 12px;text-align:center;">
+                <div style="font-size:0.7rem;color:#dc2626;">キャンセル</div>
+                <div style="font-size:0.95rem;font-weight:700;color:#dc2626;">${formatYen(statusAmounts['キャンセル'])}</div>
+                <div style="font-size:0.7rem;color:var(--text-muted,#999);">${statusCounts['キャンセル']}件 (${cancelRate}%)</div>
+            </div>
+            <div style="background:var(--bg-light,#f8f9fa);border-radius:8px;padding:10px 12px;text-align:center;">
+                <div style="font-size:0.7rem;color:#6b7280;">未確認</div>
+                <div style="font-size:0.95rem;font-weight:700;color:#6b7280;">${formatYen(statusAmounts['未確認'])}</div>
+                <div style="font-size:0.7rem;color:var(--text-muted,#999);">${statusCounts['未確認']}件 (${unconfirmedRate}%)</div>
             </div>
         </div>
 
