@@ -545,6 +545,7 @@ function renderSummary() {
             ${compRow('架電数', k.callCount, m.callCount, k.callCount + m.callCount)}
             ${compRow('PR数', k.prCount, m.prCount, k.prCount + m.prCount)}
             ${compRow('アポ数', k.appoCount, m.appoCount, k.appoCount + m.appoCount)}
+            ${compRow('アポ単価', k.appoCount > 0 ? Math.round(k.appoAmount / k.appoCount) : 0, m.appoCount > 0 ? Math.round(m.appoAmount / m.appoCount) : 0, (k.appoCount + m.appoCount) > 0 ? Math.round((k.appoAmount + m.appoAmount) / (k.appoCount + m.appoCount)) : 0, true)}
             ${compRow('架電toPR', k.callToPr, m.callToPr, (k.callCount + m.callCount) > 0 ? (k.prCount + m.prCount) / (k.callCount + m.callCount) * 100 : 0, false, true)}
             ${compRow('PRtoアポ', k.prToAppo, m.prToAppo, (k.prCount + m.prCount) > 0 ? (k.appoCount + m.appoCount) / (k.prCount + m.prCount) * 100 : 0, false, true)}
             ${compRow('架電toアポ', k.callToAppo, m.callToAppo, (k.callCount + m.callCount) > 0 ? (k.appoCount + m.appoCount) / (k.callCount + m.callCount) * 100 : 0, false, true)}
