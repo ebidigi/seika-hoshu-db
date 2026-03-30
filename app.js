@@ -177,10 +177,17 @@ function getActiveTeamNames(ym) {
 
 // 除外チームのメンバー名一覧を取得
 function getExcludedMembers(ym) {
+    // teamHistoryとmembersData両方から除外対象を収集
+    const excluded = new Set();
     const membership = getTeamsForMonth(ym);
-    return Object.entries(membership)
-        .filter(([_, team]) => EXCLUDED_TEAMS.includes(team))
-        .map(([member, _]) => member);
+    Object.entries(membership).forEach(([member, team]) => {
+        if (EXCLUDED_TEAMS.includes(team)) excluded.add(member);
+    });
+    // membersDataからも直接チェック（historyに未登録のケース対応）
+    membersData.forEach(m => {
+        if (EXCLUDED_TEAMS.includes(m.team_name)) excluded.add(m.member_name);
+    });
+    return [...excluded];
 }
 
 // 指定月の特定チームに所属するメンバー名一覧
