@@ -107,8 +107,9 @@ async function executeTurso(sql, args = []) {
     return queryTurso(sql, args);
 }
 
-// ==================== 除外チーム ====================
+// ==================== 除外チーム・メンバー ====================
 const EXCLUDED_TEAMS = ['三善Team'];
+const EXCLUDED_MEMBERS = ['三善', '轟', '堀切', '池田'];
 
 // ==================== メンバー名正規化（フロントエンド防御） ====================
 const MEMBER_NAME_NORMALIZE = {
@@ -887,6 +888,7 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
     membersData.filter(m => !excluded.includes(m.member_name)).forEach(member => {
         const memberAppo = appoData.filter(d => d.member_name === member.member_name);
         const acqAmount = memberAppo.reduce((s, a) => s + (a.amount || 0), 0);
+        const avgUnitPrice = memberAppo.length > 0 ? Math.round(acqAmount / memberAppo.length) : 0;
 
         const memberExec = execAppoData.filter(d => d.member_name === member.member_name);
         const execForecast = memberExec.filter(a => a.status !== 'キャンセル' && a.status !== 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
@@ -905,7 +907,11 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
             <div class="member-card">
                 <div class="member-card-header">
                     <span class="member-name">${displayName(member.member_name)}</span>
-                    <span class="member-team-badge">${getTeamsForMonth(ym)[member.member_name] || member.team_name}</span>
+                    <span style="display:flex;align-items:center;gap:6px;">
+                        <span style="font-size:0.7rem;color:var(--text-light);">単価</span>
+                        <span style="font-size:0.8rem;font-weight:600;font-family:'Poppins',sans-serif;">¥${avgUnitPrice.toLocaleString()}</span>
+                        <span class="member-team-badge">${getTeamsForMonth(ym)[member.member_name] || member.team_name}</span>
+                    </span>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">
                     <div>
@@ -1115,41 +1121,33 @@ function renderAppointments() {
     const rescheduleRate = total > 0 ? (statusCounts['リスケ'] / total * 100).toFixed(1) : '0';
     const unconfirmedRate = total > 0 ? (statusCounts['未確認'] / total * 100).toFixed(1) : '0';
 
+    const totalAmount = statusAmounts['実施'] + statusAmounts['リスケ'] + statusAmounts['キャンセル'] + statusAmounts['未確認'];
     document.getElementById('appo-status-summary').innerHTML = `
         <div class="rate-grid" style="margin-bottom:12px;">
             <div class="rate-card">
-                <div class="rate-value" style="color:var(--text-dark);">${total}</div>
+                <div class="rate-value" style="color:var(--text-dark);">${total}件</div>
                 <div class="rate-label">総アポ数</div>
+                <div style="font-size:0.85rem;font-weight:600;color:var(--text-dark);margin-top:2px;">¥${totalAmount.toLocaleString()}</div>
             </div>
             <div class="rate-card">
-                <div class="rate-value" style="color:var(--primary-blue);">${statusCounts['実施']}</div>
-                <div class="rate-label">実施確定 (¥${statusAmounts['実施'].toLocaleString()})</div>
+                <div class="rate-value" style="color:var(--primary-blue);">${statusCounts['実施']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${executeRate}%)</span></div>
+                <div class="rate-label">実施確定</div>
+                <div style="font-size:0.85rem;font-weight:600;color:var(--primary-blue);margin-top:2px;">¥${statusAmounts['実施'].toLocaleString()}</div>
             </div>
             <div class="rate-card">
-                <div class="rate-value" style="color:#8a7a00;">${statusCounts['リスケ']}</div>
-                <div class="rate-label">リスケ (¥${statusAmounts['リスケ'].toLocaleString()})</div>
+                <div class="rate-value" style="color:#8a7a00;">${statusCounts['リスケ']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${rescheduleRate}%)</span></div>
+                <div class="rate-label">リスケ</div>
+                <div style="font-size:0.85rem;font-weight:600;color:#8a7a00;margin-top:2px;">¥${statusAmounts['リスケ'].toLocaleString()}</div>
             </div>
             <div class="rate-card">
-                <div class="rate-value" style="color:var(--primary-red);">${statusCounts['キャンセル']}</div>
+                <div class="rate-value" style="color:var(--primary-red);">${statusCounts['キャンセル']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${cancelRate}%)</span></div>
                 <div class="rate-label">キャンセル</div>
-            </div>
-        </div>
-        <div class="rate-grid" style="margin-bottom:20px;">
-            <div class="rate-card">
-                <div class="rate-value" style="color:${parseFloat(executeRate) < 80 ? 'var(--primary-red)' : 'var(--primary-blue)'}">${executeRate}%</div>
-                <div class="rate-label">実施率</div>
+                <div style="font-size:0.85rem;font-weight:600;color:var(--primary-red);margin-top:2px;">¥${statusAmounts['キャンセル'].toLocaleString()}</div>
             </div>
             <div class="rate-card">
-                <div class="rate-value" style="color:var(--primary-red);">${cancelRate}%</div>
-                <div class="rate-label">キャンセル率</div>
-            </div>
-            <div class="rate-card">
-                <div class="rate-value" style="color:#8a7a00;">${rescheduleRate}%</div>
-                <div class="rate-label">リスケ率</div>
-            </div>
-            <div class="rate-card">
-                <div class="rate-value" style="color:var(--text-light);">${unconfirmedRate}%</div>
-                <div class="rate-label">未確認率</div>
+                <div class="rate-value" style="color:var(--text-light);">${statusCounts['未確認']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${unconfirmedRate}%)</span></div>
+                <div class="rate-label">未確認</div>
+                <div style="font-size:0.85rem;font-weight:600;color:var(--text-light);margin-top:2px;">¥${statusAmounts['未確認'].toLocaleString()}</div>
             </div>
         </div>
     `;
