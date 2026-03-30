@@ -107,6 +107,9 @@ async function executeTurso(sql, args = []) {
     return queryTurso(sql, args);
 }
 
+// ==================== 除外チーム ====================
+const EXCLUDED_TEAMS = ['三善Team'];
+
 // ==================== メンバー名正規化（フロントエンド防御） ====================
 const MEMBER_NAME_NORMALIZE = {
     '野口純': '野口', '野口 純': '野口', '@野口純/noguchi jun': '野口',
@@ -169,7 +172,15 @@ function getTeamsForMonth(ym) {
 // 指定月にアクティブなチーム名一覧
 function getActiveTeamNames(ym) {
     const membership = getTeamsForMonth(ym);
-    return [...new Set(Object.values(membership))].filter(t => t !== '所属なし').sort();
+    return [...new Set(Object.values(membership))].filter(t => t !== '所属なし' && !EXCLUDED_TEAMS.includes(t)).sort();
+}
+
+// 除外チームのメンバー名一覧を取得
+function getExcludedMembers(ym) {
+    const membership = getTeamsForMonth(ym);
+    return Object.entries(membership)
+        .filter(([_, team]) => EXCLUDED_TEAMS.includes(team))
+        .map(([member, _]) => member);
 }
 
 // 指定月の特定チームに所属するメンバー名一覧
@@ -344,9 +355,12 @@ function renderAll() {
     const filteredAppo = filterAppointments(appointmentsData, filter);
     const filteredExecAppo = filterAppointments(executionAppoData, filter);
 
-    // 概要は常にフィルタなし（全体表示）
+    // 概要は常にフィルタなし（全体表示）だが除外チームは除く
     const noFilter = { team: 'all', member: 'all', month: filter.month };
-    renderOverview(performanceData, appointmentsData, executionAppoData, noFilter);
+    const overviewPerf = filterPerformance(performanceData, noFilter);
+    const overviewAppo = filterAppointments(appointmentsData, noFilter);
+    const overviewExecAppo = filterAppointments(executionAppoData, noFilter);
+    renderOverview(overviewPerf, overviewAppo, overviewExecAppo, noFilter);
 
     // 他のタブはフィルター適用
     renderAppointments();
@@ -367,6 +381,8 @@ function getFilters() {
 
 function filterPerformance(data, filter) {
     let result = data;
+    const excluded = getExcludedMembers(filter.month);
+    result = result.filter(d => !excluded.includes(d.member_name));
     if (filter.team !== 'all') {
         const teamMembers = getTeamMembersForMonth(filter.team, filter.month);
         result = result.filter(d => teamMembers.includes(d.member_name));
@@ -379,6 +395,8 @@ function filterPerformance(data, filter) {
 
 function filterAppointments(data, filter) {
     let result = data;
+    const excluded = getExcludedMembers(filter.month);
+    result = result.filter(d => !excluded.includes(d.member_name));
     if (filter.team !== 'all') {
         const teamMembers = getTeamMembersForMonth(filter.team, filter.month);
         result = result.filter(d => teamMembers.includes(d.member_name));
@@ -401,7 +419,8 @@ function applyFilters() {
     const currentMember = memberSelect.value;
 
     memberSelect.innerHTML = '<option value="all">全員</option>';
-    const teamMembers = team === 'all' ? membersData.map(m => m.member_name) : getTeamMembersForMonth(team, ym);
+    const excluded = getExcludedMembers(ym);
+    const teamMembers = team === 'all' ? membersData.map(m => m.member_name).filter(n => !excluded.includes(n)) : getTeamMembersForMonth(team, ym);
     const filtered = membersData.filter(m => teamMembers.includes(m.member_name));
     filtered.forEach(m => {
         memberSelect.innerHTML += `<option value="${m.member_name}">${displayName(m.member_name)}</option>`;
@@ -856,8 +875,9 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
 function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
     let html = '<div class="member-grid">';
     const ym = document.getElementById('filterMonth').value;
+    const excluded = getExcludedMembers(ym);
 
-    membersData.forEach(member => {
+    membersData.filter(m => !excluded.includes(m.member_name)).forEach(member => {
         const memberAppo = appoData.filter(d => d.member_name === member.member_name);
         const acqAmount = memberAppo.reduce((s, a) => s + (a.amount || 0), 0);
 
@@ -918,6 +938,8 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
 }
 
 function renderMemberGraphs(perfData) {
+    const ym = document.getElementById('filterMonth').value;
+    const excluded = getExcludedMembers(ym);
     const PROJ_COLORS = [
         '#86aaec', '#6dc6e5', '#ede07d', '#ef947a', '#a1d7ea',
         '#c2d6f9', '#f4edb6', '#fecec0', '#b8d4f0', '#d4eaf7'
@@ -946,7 +968,7 @@ function renderMemberGraphs(perfData) {
 
     metrics.forEach(metric => {
         // メンバーごとに案件別の内訳を集計
-        const memberValues = membersData.map(member => {
+        const memberValues = membersData.filter(m => !excluded.includes(m.member_name)).map(member => {
             const memberPerf = perfData.filter(d => d.member_name === member.member_name);
             const total = metric.key === 'call_hours' ? memberPerf.reduce((s, d) => s + (d[metric.key] || 0), 0) : memberPerf.reduce((s, d) => s + (d[metric.key] || 0), 0);
             const byProject = {};
@@ -1302,12 +1324,13 @@ function renderYield(perfData, filter) {
     `;
 
     // メンバー/チーム別歩留まりテーブル
+    const excludedForYield = getExcludedMembers(filter.month);
     const teamMembersForYield = filter.team !== 'all' ? getTeamMembersForMonth(filter.team, filter.month) : null;
     const entities = filter.team !== 'all'
         ? membersData.filter(m => teamMembersForYield.includes(m.member_name))
         : filter.member !== 'all'
             ? membersData.filter(m => m.member_name === filter.member)
-            : membersData;
+            : membersData.filter(m => !excludedForYield.includes(m.member_name));
 
     // 基準値（赤字判定用）
     const BL_CTP = 15;   // 架電toPR 15%
