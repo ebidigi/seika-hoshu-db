@@ -423,7 +423,8 @@ function renderTeamSubTab(teamKey, sub) {
     const members = getTeamMembersForMonth(teamName, ym);
     const perf = performanceData.filter(d => members.includes(d.member_name));
     const appo = appointmentsData.filter(d => members.includes(d.member_name));
-    const execAppo = executionAppoData.filter(d => members.includes(d.member_name));
+    const execAppoRaw = executionAppoData.filter(d => members.includes(d.member_name));
+    const execAppo = adjustExecAppoForTeam(execAppoRaw, teamName, ym);
     const asg = assignmentsData.filter(d => members.includes(d.member_name));
 
     switch (sub) {
@@ -434,12 +435,36 @@ function renderTeamSubTab(teamKey, sub) {
     }
 }
 
+// ==================== Cross-Team Appointment Adjustments ====================
+// 3月取得→4月実施のイレギュラー: 旧チーム側に帰属させる
+const CROSS_TEAM_APPO_RULES = [
+    { member: '池田', fromTeam: '菊池Team', toTeam: '三善Team', acqMonth: '2026-03', execMonth: '2026-04' },
+    { member: '田中颯汰', fromTeam: '三善Team', toTeam: '菊池Team', acqMonth: '2026-03', execMonth: '2026-04' }
+];
+
+function adjustExecAppoForTeam(execAppo, teamName, ym) {
+    let adjusted = [...execAppo];
+    CROSS_TEAM_APPO_RULES.forEach(rule => {
+        if (ym !== rule.execMonth) return;
+        if (teamName === rule.fromTeam) {
+            // このチームから該当アポを除外
+            adjusted = adjusted.filter(a => !(a.member_name === rule.member && a.acquisition_date && a.acquisition_date.startsWith(rule.acqMonth)));
+        } else if (teamName === rule.toTeam) {
+            // このチームに該当アポを追加
+            const crossAppos = executionAppoData.filter(a => a.member_name === rule.member && a.acquisition_date && a.acquisition_date.startsWith(rule.acqMonth));
+            adjusted = adjusted.concat(crossAppos);
+        }
+    });
+    return deduplicateAppointments(adjusted);
+}
+
 // ==================== Compute Team Stats ====================
 function computeTeamStats(teamName, ym) {
     const members = getTeamMembersForMonth(teamName, ym);
     const perf = performanceData.filter(d => members.includes(d.member_name));
     const appo = appointmentsData.filter(d => members.includes(d.member_name));
-    const execAppo = executionAppoData.filter(d => members.includes(d.member_name));
+    const execAppoRaw = executionAppoData.filter(d => members.includes(d.member_name));
+    const execAppo = adjustExecAppoForTeam(execAppoRaw, teamName, ym);
     const asg = assignmentsData.filter(d => members.includes(d.member_name));
 
     const callCount = sum(perf, 'call_count');
@@ -447,6 +472,8 @@ function computeTeamStats(teamName, ym) {
     const appoCount = sum(perf, 'appointment_count');
     const appoAmount = sum(perf, 'appointment_amount');
     const execAmount = execAppo.filter(a => a.status === '実施').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execUnconfirmedAmount = execAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execForecast = execAmount + execUnconfirmedAmount * 0.85;
 
     // Target from targets table
     const teamTarget = getTarget('team', teamName, ym);
@@ -468,7 +495,7 @@ function computeTeamStats(teamName, ym) {
     const projectNames = [...new Set(asg.map(a => a.project_name))];
 
     return {
-        members, callCount, prCount, appoCount, appoAmount, execAmount,
+        members, callCount, prCount, appoCount, appoAmount, execAmount, execUnconfirmedAmount, execForecast,
         appoTarget, execTarget,
         callToPr, prToAppo, callToAppo, appoToExec,
         statusCounts, memberCount: members.length, projectCount: projectNames.length,
@@ -541,7 +568,9 @@ function renderSummary() {
             ${compRow('取得実績', k.appoAmount, m.appoAmount, k.appoAmount + m.appoAmount, true)}
             ${compRow('達成率', pct(k.appoAmount, k.appoTarget), pct(m.appoAmount, m.appoTarget), pct(k.appoAmount + m.appoAmount, k.appoTarget + m.appoTarget), false, true)}
             ${compRow('実施目標', k.execTarget, m.execTarget, k.execTarget + m.execTarget, true)}
+            ${compRow('実施目標（0.85）', k.execTarget > 0 ? Math.round(k.execTarget / 0.85) : 0, m.execTarget > 0 ? Math.round(m.execTarget / 0.85) : 0, (k.execTarget + m.execTarget) > 0 ? Math.round((k.execTarget + m.execTarget) / 0.85) : 0, true)}
             ${compRow('実施確定', k.execAmount, m.execAmount, k.execAmount + m.execAmount, true)}
+            ${compRow('実施見込（0.85）', Math.round(k.execForecast), Math.round(m.execForecast), Math.round(k.execForecast + m.execForecast), true)}
             ${compRow('架電数', k.callCount, m.callCount, k.callCount + m.callCount)}
             ${compRow('PR数', k.prCount, m.prCount, k.prCount + m.prCount)}
             ${compRow('アポ数', k.appoCount, m.appoCount, k.appoCount + m.appoCount)}
@@ -629,6 +658,8 @@ function renderTeamOverview(teamKey, teamName, ym, members, perf, appo, execAppo
     const appoCount = sum(perf, 'appointment_count');
     const appoAmount = sum(perf, 'appointment_amount');
     const execAmount = execAppo.filter(a => a.status === '実施').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execUnconfirmedAmt = execAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execForecast = execAmount + execUnconfirmedAmt * 0.85;
 
     const teamTarget = getTarget('team', teamName, ym);
     const appoTarget = teamTarget ? (parseFloat(teamTarget.appointment_amount_target) || 0) : 0;
@@ -651,11 +682,13 @@ function renderTeamOverview(teamKey, teamName, ym, members, perf, appo, execAppo
             <div class="team-kpi-item">
                 <div class="tki-label">実施目標</div>
                 <div class="tki-value">${formatYen(execTarget)}</div>
+                <div class="tki-sub">0.85換算: ${execTarget > 0 ? formatYen(Math.round(execTarget / 0.85)) : '-'}</div>
             </div>
             <div class="team-kpi-item">
                 <div class="tki-label">実施確定</div>
                 <div class="tki-value">${formatYen(execAmount)}</div>
                 <div class="tki-sub">達成率 ${execAchievement}%</div>
+                <div class="tki-sub" style="margin-top:2px;">見込（0.85）: ${formatYen(Math.round(execForecast))}</div>
             </div>
             <div class="team-kpi-item">
                 <div class="tki-label">標準進捗</div>
