@@ -2872,68 +2872,93 @@ function switchAnalysisChart(type) {
 }
 
 // ==================== Tab 6: 設定 ====================
-function renderSettings() {
-    // 月次目標設定
+function recalcTargetTotals() {
     const ym = document.getElementById('filterMonth').value;
-    let acqHtml = '';
-    let execHtml = '';
+    const teamNames = getActiveTeamNames(ym);
 
-    // 全体目標
-    const totalTarget = getTarget('total', 'all', ym);
-    acqHtml += `
-        <div class="settings-item">
-            <label>全体</label>
-            <input type="number" id="target_total_all" value="${totalTarget ? totalTarget.appointment_amount_target : settingsMap.monthly_target_total || 9000000}" min="0">
-        </div>
-    `;
-    execHtml += `
-        <div class="settings-item">
-            <label>全体</label>
-            <input type="number" id="target_total_all_exec" value="${totalTarget ? (totalTarget.execution_target || 0) : 0}" min="0">
-        </div>
-    `;
-
-    // チーム目標
-    getActiveTeamNames(ym).forEach(team => {
-        const t = getTarget('team', team, ym);
-        acqHtml += `
-            <div class="settings-item">
-                <label>${team}</label>
-                <input type="number" id="target_team_${team}" value="${t ? t.appointment_amount_target : 0}" min="0">
-            </div>
-        `;
-        execHtml += `
-            <div class="settings-item">
-                <label>${team}</label>
-                <input type="number" id="target_team_${team}_exec" value="${t ? (t.execution_target || 0) : 0}" min="0">
-            </div>
-        `;
+    ['', '_exec'].forEach(suffix => {
+        let grandTotal = 0;
+        teamNames.forEach(team => {
+            const members = getTeamMembersForMonth(team, ym);
+            let teamSum = 0;
+            members.forEach(m => {
+                const el = document.getElementById(`target_member_${m}${suffix}`);
+                if (el) teamSum += parseInt(el.value) || 0;
+            });
+            const teamEl = document.getElementById(`target_team_${team}${suffix}`);
+            const teamDisplay = document.getElementById(`target_team_${team}${suffix}_display`);
+            if (teamEl) teamEl.value = teamSum;
+            if (teamDisplay) teamDisplay.textContent = '¥' + teamSum.toLocaleString();
+            grandTotal += teamSum;
+        });
+        const totalEl = document.getElementById(`target_total_all${suffix}`);
+        const totalDisplay = document.getElementById(`target_total_all${suffix}_display`);
+        if (totalEl) totalEl.value = grandTotal;
+        if (totalDisplay) totalDisplay.textContent = '¥' + grandTotal.toLocaleString();
     });
+}
 
-    // メンバー目標
-    membersData.forEach(m => {
-        const t = getTarget('member', m.member_name, ym);
-        acqHtml += `
-            <div class="settings-item">
-                <label>${displayName(m.member_name)}</label>
-                <input type="number" id="target_member_${m.member_name}" value="${t ? t.appointment_amount_target : 0}" min="0">
-            </div>
+function renderSettings() {
+    const ym = document.getElementById('filterMonth').value;
+    const teamNames = getActiveTeamNames(ym);
+
+    function buildTargetSection(type) {
+        const isExec = type === 'exec';
+        const suffix = isExec ? '_exec' : '';
+        const targetField = isExec ? 'execution_target' : 'appointment_amount_target';
+
+        const totalTarget = getTarget('total', 'all', ym);
+        const totalVal = totalTarget ? (totalTarget[targetField] || 0) : 0;
+
+        let html = `
+            <input type="hidden" id="target_total_all${suffix}" value="${totalVal}">
+            <div class="target-team-columns">
         `;
-        execHtml += `
-            <div class="settings-item">
-                <label>${displayName(m.member_name)}</label>
-                <input type="number" id="target_member_${m.member_name}_exec" value="${t ? (t.execution_target || 0) : 0}" min="0">
-            </div>
-        `;
-    });
 
-    document.getElementById('acqTargetSettingsGrid').innerHTML = acqHtml;
-    document.getElementById('execTargetSettingsGrid').innerHTML = execHtml;
+        teamNames.forEach(team => {
+            const t = getTarget('team', team, ym);
+            const teamVal = t ? (t[targetField] || 0) : 0;
+            const members = getTeamMembersForMonth(team, ym);
 
-    // レート設定
-    document.getElementById('settingCancelRate').value = settingsMap.cancel_rate_default || '0.8';
-    document.getElementById('settingFlowRate').value = settingsMap.next_month_flow_rate || '0.5';
-    document.getElementById('settingMonthlyTarget').value = settingsMap.monthly_target_total || '9000000';
+            html += `
+                <div class="target-team-col">
+                    <div class="target-team-header">
+                        <span class="target-team-name">${team.replace('Team', '')}</span>
+                        <span class="target-team-sum" id="target_team_${team}${suffix}_display">¥0</span>
+                        <input type="hidden" id="target_team_${team}${suffix}" value="${teamVal}">
+                    </div>
+            `;
+
+            members.forEach(memberName => {
+                const mt = getTarget('member', memberName, ym);
+                const mVal = mt ? (mt[targetField] || 0) : 0;
+                html += `
+                    <div class="target-member-row">
+                        <label>${displayName(memberName)}</label>
+                        <input type="number" id="target_member_${memberName}${suffix}" value="${mVal}" min="0" oninput="recalcTargetTotals()">
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+        });
+
+        html += `</div>`;
+        return html;
+    }
+
+    document.getElementById('acqTargetSettingsGrid').innerHTML = buildTargetSection('acq');
+    document.getElementById('execTargetSettingsGrid').innerHTML = buildTargetSection('exec');
+
+    recalcTargetTotals();
+
+    // レート設定（DOM要素がある場合のみ）
+    const crEl = document.getElementById('settingCancelRate');
+    const frEl = document.getElementById('settingFlowRate');
+    const mtEl = document.getElementById('settingMonthlyTarget');
+    if (crEl) crEl.value = settingsMap.cancel_rate_default || '0.8';
+    if (frEl) frEl.value = settingsMap.next_month_flow_rate || '0.5';
+    if (mtEl) mtEl.value = settingsMap.monthly_target_total || '9000000';
 
     // メンバー管理テーブル
     let memberRows = '';

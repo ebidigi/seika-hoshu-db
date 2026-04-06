@@ -2129,6 +2129,82 @@ th.sortable:hover { background: var(--gray-200); }
     display: none;
 }
 
+/* ========== 目標設定レイアウト ========== */
+.target-total-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--primary-blue);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 10px;
+    margin-bottom: 16px;
+}
+.target-total-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+.target-total-value {
+    font-family: 'Poppins', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+.target-team-columns {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+}
+@media (max-width: 900px) {
+    .target-team-columns { grid-template-columns: repeat(2, 1fr); }
+}
+.target-team-col {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.target-team-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--blue-50);
+    border-bottom: 1px solid var(--border-color);
+}
+.target-team-name {
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+.target-team-sum {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--primary-blue);
+}
+.target-member-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--border-color);
+}
+.target-member-row:last-child {
+    border-bottom: none;
+}
+.target-member-row label {
+    font-size: 0.8rem;
+    color: var(--text-dark);
+    white-space: nowrap;
+}
+.target-member-row input {
+    width: 100px;
+    text-align: right;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.85rem;
+}
+
 /* ========== 印刷 ========== */
 @media print {
     .sidebar, .top-header, .filter-section, .refresh-btn { display: none !important; }
