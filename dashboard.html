@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DigiMan チーム900 | CROダッシュボード</title>
+    <title>DigiMan 成果報酬 | CROダッシュボード</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
     <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
@@ -24,7 +25,7 @@
     <header class="top-header">
         <div class="header-left">
             <span class="logo-text">DigiMan</span>
-            <span class="logo-sub">チーム900</span>
+            <span class="logo-sub">成果報酬</span>
         </div>
         <div class="header-center">
             <input type="month" id="filterMonth" onchange="onMonthChange()">
@@ -56,6 +57,7 @@
         <button class="nav-tab active" data-page="summary" onclick="switchPage('summary')">サマリ</button>
         <button class="nav-tab" data-page="team-kikuchi" onclick="switchPage('team-kikuchi')">菊池Team</button>
         <button class="nav-tab" data-page="team-miyoshi" onclick="switchPage('team-miyoshi')">三善Team</button>
+        <button class="nav-tab" data-page="team-kadou" onclick="switchPage('team-kadou')">稼働報酬Team</button>
     </nav>
 
     <!-- メインコンテンツ -->
@@ -113,6 +115,28 @@
             <div class="sub-page hidden" id="miyoshi-appointments"></div>
             <div class="sub-page hidden" id="miyoshi-projects"></div>
             <div class="sub-page hidden" id="miyoshi-analysis"></div>
+        </div>
+
+        <!-- ====== 稼働報酬Team ====== -->
+        <div class="page hidden" id="page-team-kadou">
+            <div class="team-sub-tabs" id="kadouSubTabs">
+                <button class="sub-tab active" data-sub="overview" onclick="switchKadouSubTab('overview')">概要</button>
+                <button class="sub-tab" data-sub="analysis" onclick="switchKadouSubTab('analysis')">分析</button>
+                <button class="sub-tab" data-sub="yield" onclick="switchKadouSubTab('yield')">歩留まり</button>
+                <button class="sub-tab" data-sub="settings" onclick="switchKadouSubTab('settings')">設定</button>
+            </div>
+            <div class="sub-page" id="kadou-overview">
+                <div id="kadouOverviewContent"></div>
+            </div>
+            <div class="sub-page hidden" id="kadou-analysis">
+                <div id="kadouAnalysisContent"></div>
+            </div>
+            <div class="sub-page hidden" id="kadou-yield">
+                <div id="kadouYieldContent"></div>
+            </div>
+            <div class="sub-page hidden" id="kadou-settings">
+                <div id="kadouSettingsContent"></div>
+            </div>
         </div>
     </main>
 
@@ -222,6 +246,78 @@
                     <button class="btn btn-secondary" onclick="closeModal('assignmentModal')">キャンセル</button>
                     <button class="btn btn-primary" id="assignmentSaveBtn" onclick="saveAssignment()">保存</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 稼働報酬 案件フォームモーダル ====== -->
+    <div class="modal-overlay hidden" id="kadouDealModal">
+        <div class="modal" style="max-width:560px;">
+            <div class="modal-header">
+                <h3 id="kadouDealFormTitle">新規案件を追加</h3>
+                <button class="modal-close" onclick="closeKadouDealForm()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="kadouDealForm" onsubmit="return false;">
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2;">
+                            <label for="kdDealName">案件名 *</label>
+                            <input type="text" id="kdDealName" required>
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label for="kdDealOwner">担当者 *</label>
+                            <select id="kdDealOwner"><option value="">選択</option></select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="kdDealPhase">フェーズ</label>
+                            <select id="kdDealPhase" onchange="toggleKdDealFields()">
+                                <option value="提案前">提案前</option>
+                                <option value="提案済み">提案済み</option>
+                                <option value="見積もり提出済み">見積もり提出済み</option>
+                                <option value="受注">受注</option>
+                                <option value="保留">保留</option>
+                                <option value="失注">失注</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="kdDealAmount">金額</label>
+                            <input type="number" id="kdDealAmount" min="0" placeholder="0">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" id="kdDealProbField">
+                            <label for="kdDealProbability">確度 (%)</label>
+                            <input type="number" id="kdDealProbability" min="0" max="100" placeholder="50">
+                        </div>
+                        <div class="form-group">
+                            <label for="kdDealStartDate">案件開始予定日</label>
+                            <input type="date" id="kdDealStartDate">
+                        </div>
+                    </div>
+                    <div id="kdDealActionFields">
+                        <div class="form-row">
+                            <div class="form-group" style="flex:2;">
+                                <label for="kdDealNextAction">次アクション</label>
+                                <input type="text" id="kdDealNextAction" placeholder="次に行うこと">
+                            </div>
+                            <div class="form-group" style="flex:1;">
+                                <label for="kdDealDeadline">期限</label>
+                                <input type="date" id="kdDealDeadline">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="kdDealMemo">メモ</label>
+                        <textarea id="kdDealMemo" rows="2" placeholder="備考"></textarea>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                        <button type="button" class="btn btn-secondary" onclick="closeKadouDealForm()">キャンセル</button>
+                        <button type="button" class="btn btn-danger" id="kdDealDeleteBtn" style="display:none;" onclick="deleteKadouDeal()">削除</button>
+                        <button type="button" class="btn btn-primary" id="kdDealSubmitBtn" onclick="submitKadouDealForm()">保存</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>

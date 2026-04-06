@@ -5,7 +5,7 @@ const TURSO_CONFIG = {
 };
 
 // ==================== グローバル状態 ====================
-let currentTab = 'overview';
+let currentTab = 'morning';
 let performanceData = [];
 let appointmentsData = [];
 let membersData = [];
@@ -43,7 +43,7 @@ let appoSortAsc = false; // false=降順
 
 // ==================== 初期化 ====================
 document.addEventListener('DOMContentLoaded', () => {
-    // 月フィルターを今月に設定
+    // 月フィルターを2026年3月に固定
     const now = new Date();
     const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
     document.getElementById('filterMonth').value = ym;
@@ -51,9 +51,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // 日次目標の日付をデフォルトで明日に
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    document.getElementById('dailyTargetDate').value = formatDate(tomorrow);
+    const dailyTargetDateEl = document.getElementById('dailyTargetDate');
+    if (dailyTargetDateEl) dailyTargetDateEl.value = formatDate(tomorrow);
 
-    // 概要タブがデフォルトなのでフィルターを非表示
+    // 朝礼タブがデフォルトなのでフィルターを非表示
     const filters = document.getElementById('globalFilters');
     if (filters) filters.style.display = 'none';
 
@@ -108,8 +109,8 @@ async function executeTurso(sql, args = []) {
 }
 
 // ==================== 除外チーム・メンバー ====================
-const EXCLUDED_TEAMS = ['三善Team'];
-const EXCLUDED_MEMBERS = ['三善', '轟', '堀切', '池田'];
+const EXCLUDED_TEAMS = [];
+const EXCLUDED_MEMBERS = [];
 
 // ==================== メンバー名正規化（フロントエンド防御） ====================
 const MEMBER_NAME_NORMALIZE = {
@@ -131,7 +132,8 @@ const MEMBER_NAME_NORMALIZE = {
     '池田愛': '池田', '池田 愛': '池田', '@池田愛/ikeda ai': '池田',
     '轟玲音': '轟', '轟 玲音': '轟',
     '清水陸斗': '清水', '清水 陸斗': '清水',
-    '堀切友世': '堀切', '堀切 友世': '堀切'
+    '堀切友世': '堀切', '堀切 友世': '堀切',
+    '田端音藍': '田端', '田端 音藍': '田端', 'タバタ': '田端'
 };
 
 function normalizeMemberName(name) {
@@ -240,6 +242,82 @@ function deduplicatePerformance(perfArray) {
         }
     }
     return Array.from(seen.values());
+}
+
+// ==================== クロスチーム アポ補正 ====================
+const CROSS_TEAM_APPO_RULES = [
+    { member: '池田', fromTeam: '菊池Team', toTeam: '三善Team', acqMonth: '2026-03', execMonth: '2026-04' },
+    { member: '田中颯汰', fromTeam: '三善Team', toTeam: '菊池Team', acqMonth: '2026-03', execMonth: '2026-04' }
+];
+
+function adjustExecAppoForTeam(execAppo, teamName, ym) {
+    let adjusted = [...execAppo];
+    CROSS_TEAM_APPO_RULES.forEach(rule => {
+        if (ym !== rule.execMonth) return;
+        if (teamName === rule.fromTeam) {
+            adjusted = adjusted.filter(a => !(a.member_name === rule.member && a.acquisition_date && a.acquisition_date.startsWith(rule.acqMonth)));
+        } else if (teamName === rule.toTeam) {
+            const crossAppos = executionAppoData.filter(a => a.member_name === rule.member && a.acquisition_date && a.acquisition_date.startsWith(rule.acqMonth));
+            adjusted = adjusted.concat(crossAppos);
+        }
+    });
+    return deduplicateAppointments(adjusted);
+}
+
+// ==================== チーム統計集計 ====================
+function computeTeamStats(teamName, ym) {
+    const members = getTeamMembersForMonth(teamName, ym);
+    const perf = performanceData.filter(d => members.includes(d.member_name));
+    const appo = appointmentsData.filter(d => members.includes(d.member_name));
+    const execAppoRaw = executionAppoData.filter(d => members.includes(d.member_name));
+    const execAppo = adjustExecAppoForTeam(execAppoRaw, teamName, ym);
+    const asg = assignmentsData.filter(d => members.includes(d.member_name));
+
+    const callCount = sum(perf, 'call_count');
+    const prCount = sum(perf, 'pr_count');
+    const appoCount = sum(perf, 'appointment_count');
+    const appoAmount = sum(perf, 'appointment_amount');
+    const execAmount = execAppo.filter(a => a.status === '実施').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execUnconfirmedAmount = execAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execCancelledAmount = execAppo.filter(a => a.status === 'キャンセル').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execRescheduleAmount = execAppo.filter(a => a.status === 'リスケ').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execForecast = execAmount + execUnconfirmedAmount;
+
+    const teamTarget = getTarget('team', teamName, ym);
+    const appoTarget = teamTarget ? (parseFloat(teamTarget.appointment_amount_target) || 0) : 0;
+    const execTarget = teamTarget ? (parseFloat(teamTarget.execution_target) || 0) : 0;
+
+    const callToPr = callCount > 0 ? prCount / callCount * 100 : 0;
+    const prToAppo = prCount > 0 ? appoCount / prCount * 100 : 0;
+    const callToAppo = callCount > 0 ? appoCount / callCount * 100 : 0;
+
+    const allAppo = deduplicateAppointments([...appo, ...execAppo]);
+    const execConfirmedCount = execAppo.filter(a => a.status === '実施').length;
+    const appoToExec = allAppo.length > 0 ? execConfirmedCount / allAppo.length * 100 : 0;
+    const statusCounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
+    allAppo.forEach(a => { if (statusCounts[a.status] !== undefined) statusCounts[a.status]++; });
+
+    // 実施見込内訳（キャンセル・リスケ除外）
+    const execAppoActive = execAppo.filter(a => a.status === '実施' || a.status === '未確認');
+    const currentMonthExec = execAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym));
+    const prevMonthExec = execAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym));
+    const currentMonthExecAmount = currentMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const prevMonthExecAmount = prevMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    // 当月アポ実施率 = 当月取得のうち当月実施見込 / 当月取得アポ金額
+    const currentMonthAcqAmount = appo.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const currentMonthExecRate = currentMonthAcqAmount > 0 ? currentMonthExecAmount / currentMonthAcqAmount * 100 : 0;
+
+    const projectNames = [...new Set(asg.map(a => a.project_name))];
+
+    return {
+        members, callCount, prCount, appoCount, appoAmount,
+        execAmount, execUnconfirmedAmount, execCancelledAmount, execRescheduleAmount, execForecast,
+        appoTarget, execTarget,
+        callToPr, prToAppo, callToAppo, appoToExec,
+        statusCounts, memberCount: members.length, projectCount: projectNames.length,
+        currentMonthExecAmount, prevMonthExecAmount, currentMonthExecRate,
+        perf, appo, execAppo, asg
+    };
 }
 
 // ==================== データ読み込み ====================
@@ -357,24 +435,25 @@ function refreshData() {
 }
 
 // ==================== レンダリング統合 ====================
+let currentAnalysisSub = 'performance';
+
 function renderAll() {
     const filter = getFilters();
     const filteredPerf = filterPerformance(performanceData, filter);
     const filteredAppo = filterAppointments(appointmentsData, filter);
     const filteredExecAppo = filterAppointments(executionAppoData, filter);
 
-    // 概要は常にフィルタなし（全体表示）だが除外チームは除く
+    // 朝礼・経営はフィルタなし（全体表示）
     const noFilter = { team: 'all', member: 'all', month: filter.month };
-    const overviewPerf = filterPerformance(performanceData, noFilter);
-    const overviewAppo = filterAppointments(appointmentsData, noFilter);
-    const overviewExecAppo = filterAppointments(executionAppoData, noFilter);
-    renderOverview(overviewPerf, overviewAppo, overviewExecAppo, noFilter);
+    renderMorning(noFilter);
+    renderManagement(noFilter);
 
     // 他のタブはフィルター適用
     renderAppointments();
     renderYield(filteredPerf, filter);
-    renderProjects();
     renderAnalysis(filteredPerf, filter);
+    renderIndividualAnalysis(noFilter);
+    renderProjects();
     renderSettings();
 }
 
@@ -452,6 +531,7 @@ function populateMemberFilter() {
 
 function populateDailyTargetMember() {
     const select = document.getElementById('dailyTargetMember');
+    if (!select) return;
     select.innerHTML = '';
     membersData.forEach(m => {
         select.innerHTML += `<option value="${m.member_name}">${displayName(m.member_name)}</option>`;
@@ -624,7 +704,456 @@ function initTodayTooltips() {
     });
 }
 
-// ==================== Tab 1: 概要 ====================
+// ==================== Tab: 朝礼 ====================
+function renderMorning(filter) {
+    const ym = filter.month;
+    const totalTarget = getTarget('total', 'all', ym);
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
+    const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
+
+    // 全体集計
+    const excluded = getExcludedMembers(ym);
+    const allPerf = performanceData.filter(d => !excluded.includes(d.member_name));
+    const allAppo = appointmentsData.filter(d => !excluded.includes(d.member_name));
+    const allExecAppo = executionAppoData.filter(d => !excluded.includes(d.member_name));
+
+    const acquisitionAmount = allAppo.reduce((s, a) => s + (a.amount || 0), 0);
+    const execConfirmed = allExecAppo.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
+    const execUnconfirmed = allExecAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
+    const execExpected = execConfirmed + execUnconfirmed;
+
+    // 営業日
+    const { elapsed, total: totalDays } = getBusinessDays(ym);
+    const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
+    const remaining = totalDays - elapsed;
+
+    document.getElementById('progressBadge').textContent = `標準進捗: ${standardProgress}%`;
+    document.getElementById('dateInfo').textContent = `${ym} | 経過 ${elapsed}日 / 全${totalDays}営業日`;
+
+    // 取得進捗
+    const acqRate = monthlyTarget > 0 ? Math.round(acquisitionAmount / monthlyTarget * 1000) / 10 : 0;
+    const acqBarWidth = Math.min(acqRate, 100);
+    const acqBarColor = acqRate >= standardProgress ? '#86aaec' : acqRate >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+
+    // 実施進捗
+    const confirmedRate = executionTarget > 0 ? Math.round(execConfirmed / executionTarget * 1000) / 10 : 0;
+    const confirmedBarWidth = Math.min(confirmedRate, 100);
+    const confirmedBarColor = confirmedRate >= standardProgress ? '#86aaec' : confirmedRate >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+
+    // ラップ目標
+    const lapTarget = Math.round(monthlyTarget * (elapsed / totalDays));
+    const lapExecTarget = Math.round(executionTarget * (elapsed / totalDays));
+
+    // 実施見込内訳（キャンセル・リスケ除外）
+    const allExecAppoActive = allExecAppo.filter(a => a.status === '実施' || a.status === '未確認');
+    const currentMonthExec = allExecAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym));
+    const prevMonthExec = allExecAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym));
+    const currentMonthExecAmt = currentMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const prevMonthExecAmt = prevMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    // 当月アポ実施率 = 当月取得のうち当月実施見込 / 当月取得アポ金額
+    const currentMonthExecRate = acquisitionAmount > 0 ? Math.round(currentMonthExecAmt / acquisitionAmount * 1000) / 10 : 0;
+
+    // KPIカード（1カード1指標）
+    document.getElementById('morningKpiBar').innerHTML = `
+        <div class="morning-kpi-grid">
+            <div class="morning-kpi-card">
+                <div class="morning-kpi-label">取得金額</div>
+                <div class="morning-kpi-value">¥${acquisitionAmount.toLocaleString()}</div>
+                <div class="morning-kpi-sub" style="color:${acqBarColor};">達成率 ${acqRate}%</div>
+                <div class="morning-kpi-bar">
+                    <div class="morning-kpi-bar-fill" style="width:${acqBarWidth}%;background:${acqBarColor};"></div>
+                    <div class="morning-kpi-bar-std" style="left:${Math.min(standardProgress, 100)}%;"></div>
+                </div>
+                <div class="morning-kpi-detail">目標 ¥${monthlyTarget.toLocaleString()}</div>
+            </div>
+            <div class="morning-kpi-card">
+                <div class="morning-kpi-label">実施確定</div>
+                <div class="morning-kpi-value" style="color:#90b8f8;">¥${execConfirmed.toLocaleString()}</div>
+                <div class="morning-kpi-sub" style="color:${confirmedBarColor};">達成率 ${confirmedRate}%</div>
+                <div class="morning-kpi-bar">
+                    <div class="morning-kpi-bar-fill" style="width:${confirmedBarWidth}%;background:${confirmedBarColor};"></div>
+                    <div class="morning-kpi-bar-std" style="left:${Math.min(standardProgress, 100)}%;"></div>
+                </div>
+                <div class="morning-kpi-detail">目標 ¥${executionTarget.toLocaleString()}</div>
+            </div>
+            <div class="morning-kpi-card">
+                <div class="morning-kpi-label">実施見込（未確認）</div>
+                <div class="morning-kpi-value">¥${execUnconfirmed.toLocaleString()}</div>
+                <div class="morning-kpi-detail">当月 ¥${currentMonthExecAmt.toLocaleString()} / 越し ¥${prevMonthExecAmt.toLocaleString()}</div>
+            </div>
+            <div class="morning-kpi-card ${currentMonthExecRate < 60 ? 'morning-kpi-warn' : ''}">
+                <div class="morning-kpi-label">当月アポ実施率</div>
+                <div class="morning-kpi-value ${currentMonthExecRate < 60 ? 'morning-exec-warning' : ''}">${currentMonthExecRate}%${currentMonthExecRate < 60 ? ' ⚠' : ''}</div>
+                <div class="morning-kpi-detail">当月取得のうち当月実施見込の割合</div>
+            </div>
+        </div>
+    `;
+
+    // アラート
+    const alerts = [];
+    if (acqRate < standardProgress - 10) {
+        const gap = monthlyTarget - acquisitionAmount;
+        const dailyNeeded = remaining > 0 ? Math.ceil(gap / remaining) : gap;
+        alerts.push(`取得目標差分 -¥${gap.toLocaleString()}（残${remaining}日で日次¥${dailyNeeded.toLocaleString()}必要）`);
+    }
+    if (currentMonthExecRate < 60) {
+        alerts.push(`当月アポ実施率が${currentMonthExecRate}%です。月内アポ組みを強化してください。`);
+    }
+    document.getElementById('morningAlerts').innerHTML = alerts.map(a =>
+        `<div class="alert-banner"><span class="alert-banner-icon">&#9888;</span><span class="alert-banner-text">${a}</span></div>`
+    ).join('');
+
+    // チーム比較テーブル
+    const teamNames = getActiveTeamNames(ym);
+    const teamRows = teamNames.map(teamName => {
+        const s = computeTeamStats(teamName, ym);
+        const lap = totalDays > 0 ? Math.round(s.appoTarget * (elapsed / totalDays)) : 0;
+        const acqR = s.appoTarget > 0 ? Math.round(s.appoAmount / s.appoTarget * 1000) / 10 : 0;
+        const execR = s.execTarget > 0 ? Math.round(s.execAmount / s.execTarget * 1000) / 10 : 0;
+        const acqColor = acqR >= standardProgress ? '#86aaec' : acqR >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+        const execColor = execR >= standardProgress ? '#86aaec' : execR >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+        const execWarn = s.currentMonthExecRate < 60;
+        return { teamName, s, lap, acqR, execR, acqColor, execColor, execWarn };
+    });
+
+    // 合計行の計算
+    const totals = {
+        appoTarget: teamRows.reduce((s, r) => s + r.s.appoTarget, 0),
+        appoAmount: teamRows.reduce((s, r) => s + r.s.appoAmount, 0),
+        execTarget: teamRows.reduce((s, r) => s + r.s.execTarget, 0),
+        execAmount: teamRows.reduce((s, r) => s + r.s.execAmount, 0),
+        execUnconfirmed: teamRows.reduce((s, r) => s + r.s.execUnconfirmedAmount, 0),
+        currentMonthExec: teamRows.reduce((s, r) => s + r.s.currentMonthExecAmount, 0),
+        prevMonthExec: teamRows.reduce((s, r) => s + r.s.prevMonthExecAmount, 0),
+    };
+    const totalLap = totalDays > 0 ? Math.round(totals.appoTarget * (elapsed / totalDays)) : 0;
+    const totalAcqR = totals.appoTarget > 0 ? Math.round(totals.appoAmount / totals.appoTarget * 1000) / 10 : 0;
+    const totalExecR = totals.execTarget > 0 ? Math.round(totals.execAmount / totals.execTarget * 1000) / 10 : 0;
+    const totalCurrentExecRate = totals.appoAmount > 0 ? Math.round(totals.currentMonthExec / totals.appoAmount * 1000) / 10 : 0;
+
+    let tableHtml = `
+    <div class="morning-table-wrap">
+        <table class="morning-compare-table">
+            <thead>
+                <tr>
+                    <th>チーム</th>
+                    <th class="text-right">取得目標</th>
+                    <th class="text-right">ラップ</th>
+                    <th class="text-right">取得実績</th>
+                    <th class="text-right">達成率</th>
+                    <th style="width:80px;">進捗</th>
+                    <th class="text-right">実施目標</th>
+                    <th class="text-right">実施確定</th>
+                    <th class="text-right">達成率</th>
+                    <th class="text-right">見込(未確認)</th>
+                    <th class="text-right">当月実施率</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+    teamRows.forEach(r => {
+        tableHtml += `
+                <tr>
+                    <td class="morning-team-cell">${escapeHtml(r.teamName.replace('Team', ''))}<span class="morning-member-count">${r.s.memberCount}名</span></td>
+                    <td class="text-right">¥${r.s.appoTarget.toLocaleString()}</td>
+                    <td class="text-right" style="color:var(--text-light);">¥${r.lap.toLocaleString()}</td>
+                    <td class="text-right" style="font-weight:700;">¥${r.s.appoAmount.toLocaleString()}</td>
+                    <td class="text-right" style="font-weight:600;color:${r.acqColor};">${r.acqR}%</td>
+                    <td>
+                        <div class="morning-inline-bar">
+                            <div class="morning-inline-fill" style="width:${Math.min(r.acqR, 100)}%;background:${r.acqColor};"></div>
+                            <div class="morning-inline-standard" style="left:${Math.min(standardProgress, 100)}%;"></div>
+                        </div>
+                    </td>
+                    <td class="text-right">¥${r.s.execTarget.toLocaleString()}</td>
+                    <td class="text-right" style="font-weight:700;">¥${r.s.execAmount.toLocaleString()}</td>
+                    <td class="text-right" style="font-weight:600;color:${r.execColor};">${r.execR}%</td>
+                    <td class="text-right">¥${r.s.execUnconfirmedAmount.toLocaleString()}</td>
+                    <td class="text-right ${r.execWarn ? 'morning-exec-warning' : ''}" style="font-weight:600;">${r.s.currentMonthExecRate.toFixed(1)}%${r.execWarn ? ' ⚠' : ''}</td>
+                </tr>`;
+    });
+
+    // 合計行
+    const totalAcqColor = totalAcqR >= standardProgress ? '#86aaec' : totalAcqR >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+    const totalExecColor = totalExecR >= standardProgress ? '#86aaec' : totalExecR >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+    tableHtml += `
+            </tbody>
+            <tfoot>
+                <tr class="morning-total-row">
+                    <td class="morning-team-cell" style="font-weight:700;">合計</td>
+                    <td class="text-right">¥${totals.appoTarget.toLocaleString()}</td>
+                    <td class="text-right" style="color:var(--text-light);">¥${totalLap.toLocaleString()}</td>
+                    <td class="text-right" style="font-weight:700;">¥${totals.appoAmount.toLocaleString()}</td>
+                    <td class="text-right" style="font-weight:700;color:${totalAcqColor};">${totalAcqR}%</td>
+                    <td>
+                        <div class="morning-inline-bar">
+                            <div class="morning-inline-fill" style="width:${Math.min(totalAcqR, 100)}%;background:${totalAcqColor};"></div>
+                            <div class="morning-inline-standard" style="left:${Math.min(standardProgress, 100)}%;"></div>
+                        </div>
+                    </td>
+                    <td class="text-right">¥${totals.execTarget.toLocaleString()}</td>
+                    <td class="text-right" style="font-weight:700;">¥${totals.execAmount.toLocaleString()}</td>
+                    <td class="text-right" style="font-weight:700;color:${totalExecColor};">${totalExecR}%</td>
+                    <td class="text-right">¥${totals.execUnconfirmed.toLocaleString()}</td>
+                    <td class="text-right" style="font-weight:700;">${totalCurrentExecRate}%</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>`;
+
+    document.getElementById('morningTeamCards').innerHTML = tableHtml;
+}
+
+// ==================== Tab: 経営 ====================
+function renderManagement(filter) {
+    const ym = filter.month;
+    const totalTarget = getTarget('total', 'all', ym);
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
+    const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
+    const cancelRate = parseFloat(settingsMap.cancel_rate_default || '0.8');
+
+    const excluded = getExcludedMembers(ym);
+    const allAppo = appointmentsData.filter(d => !excluded.includes(d.member_name));
+    const allExecAppo = executionAppoData.filter(d => !excluded.includes(d.member_name));
+    const allPerf = performanceData.filter(d => !excluded.includes(d.member_name));
+
+    const acquisitionAmount = allAppo.reduce((s, a) => s + (a.amount || 0), 0);
+    const execConfirmed = allExecAppo.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
+    const execUnconfirmed = allExecAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
+    const execCancelled = allExecAppo.filter(a => a.status === 'キャンセル').reduce((s, a) => s + (a.amount || 0), 0);
+    const execReschedule = allExecAppo.filter(a => a.status === 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
+
+    const { elapsed, total: totalDays } = getBusinessDays(ym);
+    const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
+    const acqRate = monthlyTarget > 0 ? Math.round(acquisitionAmount / monthlyTarget * 1000) / 10 : 0;
+    const execRate = executionTarget > 0 ? Math.round(execConfirmed / executionTarget * 1000) / 10 : 0;
+
+    // 実施見込み逆算
+    const neededAcquisition = cancelRate > 0 ? Math.round(executionTarget / cancelRate) : executionTarget;
+    const acqGap = neededAcquisition - acquisitionAmount;
+
+    // 実施見込内訳（キャンセル・リスケ除外）
+    const allExecAppoActive = allExecAppo.filter(a => a.status === '実施' || a.status === '未確認');
+    const currentMonthExec = allExecAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym));
+    const prevMonthExec = allExecAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym));
+    const currentMonthExecAmt = currentMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const prevMonthExecAmt = prevMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+
+    // セクション1: 売上目標進捗
+    let html = `
+    <div class="section-title">全体 売上目標進捗</div>
+    <div class="mgmt-progress-grid">
+        <div class="mgmt-progress-card">
+            <div class="mgmt-progress-label">取得金額</div>
+            <div class="mgmt-progress-amount">¥${acquisitionAmount.toLocaleString()} <span class="mgmt-progress-rate" style="color:${acqRate >= standardProgress ? '#86aaec' : '#ef947a'};">/ ${acqRate}%</span></div>
+            <div class="mgmt-progress-sub">目標 ¥${monthlyTarget.toLocaleString()}</div>
+        </div>
+        <div class="mgmt-progress-card">
+            <div class="mgmt-progress-label">実施確定</div>
+            <div class="mgmt-progress-amount" style="color:#90b8f8;">¥${execConfirmed.toLocaleString()} <span class="mgmt-progress-rate" style="color:${execRate >= standardProgress ? '#86aaec' : '#ef947a'};">/ ${execRate}%</span></div>
+            <div class="mgmt-progress-sub">目標 ¥${executionTarget.toLocaleString()}</div>
+        </div>
+        <div class="mgmt-progress-card">
+            <div class="mgmt-progress-label">実施見込（未確認）</div>
+            <div class="mgmt-progress-amount">¥${execUnconfirmed.toLocaleString()}</div>
+            <div class="mgmt-progress-sub">確定分は除外</div>
+        </div>
+    </div>`;
+
+    // セクション2: 実施見込み逆算
+    html += `
+    <div class="section-title" style="margin-top:24px;">実施見込み逆算</div>
+    <div class="mgmt-reverse-calc">
+        <table class="data-table">
+            <thead><tr>
+                <th>実施目標</th><th>実施率想定</th><th>必要取得額</th><th>現在取得額</th><th>差分</th>
+                <th>当月取得→実施</th><th>前月越し</th>
+            </tr></thead>
+            <tbody><tr>
+                <td class="text-right">¥${executionTarget.toLocaleString()}</td>
+                <td class="text-right">${(cancelRate * 100).toFixed(0)}%</td>
+                <td class="text-right" style="font-weight:600;">¥${neededAcquisition.toLocaleString()}</td>
+                <td class="text-right">¥${acquisitionAmount.toLocaleString()}</td>
+                <td class="text-right" style="color:${acqGap > 0 ? 'var(--primary-red)' : '#86aaec'};font-weight:600;">${acqGap > 0 ? '-' : '+'}¥${Math.abs(acqGap).toLocaleString()}</td>
+                <td class="text-right">¥${currentMonthExecAmt.toLocaleString()}</td>
+                <td class="text-right">¥${prevMonthExecAmt.toLocaleString()}</td>
+            </tr></tbody>
+        </table>
+    </div>`;
+
+    // セクション3: 案件キャップ進捗 + 基準値判定
+    html += `<div class="section-title" style="margin-top:24px;">案件キャップ進捗</div>`;
+    const ym2 = ym;
+    const capData = projectsData.filter(p => p.status === 'active').map(proj => {
+        const projPerf = allPerf.filter(d => d.project_name === proj.project_name);
+        const projAppo = allAppo.filter(d => d.project_name === proj.project_name);
+        const callCount = sum(projPerf, 'call_count');
+        const appoCount = sum(projPerf, 'appointment_count');
+        const callToAppo = callCount > 0 ? appoCount / callCount * 100 : 0;
+        const unitPrice = proj.unit_price || 0;
+        const profitScore = unitPrice * callToAppo / 100;
+        const actualCount = projAppo.length;
+        const actualAmount = projAppo.reduce((s, a) => s + (a.amount || 0), 0);
+        const capCount = proj.monthly_cap_count || 0;
+        const capAmount = capCount * unitPrice;
+        return { ...proj, callCount, appoCount, callToAppo, profitScore, actualCount, actualAmount, capCount, capAmount };
+    });
+
+    let totalCapAmount = 0, totalActualAmount = 0;
+    html += `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+        <th>案件名</th><th class="text-right">単価</th><th class="text-right">キャップ数</th><th class="text-right">キャップ金額</th>
+        <th class="text-right">取得数</th><th class="text-right">取得金額</th><th class="text-right">消化率</th>
+        <th class="text-right">架toア率</th><th class="text-right">収益性</th><th>判定</th>
+    </tr></thead><tbody>`;
+
+    capData.forEach(c => {
+        totalCapAmount += c.capAmount;
+        totalActualAmount += c.actualAmount;
+        const consumeRate = c.capCount > 0 ? Math.round(c.actualCount / c.capCount * 100) : 0;
+        const isGood = c.profitScore >= 7.5;
+        html += `<tr>
+            <td>${escapeHtml(c.project_name)}</td>
+            <td class="text-right">¥${c.unit_price.toLocaleString()}</td>
+            <td class="text-right">${c.capCount}</td>
+            <td class="text-right">¥${c.capAmount.toLocaleString()}</td>
+            <td class="text-right">${c.actualCount}</td>
+            <td class="text-right">¥${c.actualAmount.toLocaleString()}</td>
+            <td class="text-right">${consumeRate}%</td>
+            <td class="text-right">${c.callToAppo.toFixed(1)}%</td>
+            <td class="text-right" style="font-weight:600;color:${isGood ? '#86aaec' : 'var(--primary-red)'};">${c.profitScore.toFixed(1)}</td>
+            <td>${isGood ? '<span style="color:#86aaec;">適正</span>' : '<span style="color:var(--primary-red);">要改善</span>'}</td>
+        </tr>`;
+    });
+    const capSufficient = totalCapAmount >= monthlyTarget;
+    html += `</tbody><tfoot><tr style="font-weight:600;">
+        <td>合計</td><td></td><td></td>
+        <td class="text-right" style="color:${capSufficient ? '#86aaec' : 'var(--primary-red)'};">¥${totalCapAmount.toLocaleString()}</td>
+        <td></td><td class="text-right">¥${totalActualAmount.toLocaleString()}</td>
+        <td></td><td></td><td></td>
+        <td>${capSufficient ? '充足' : '<span style="color:var(--primary-red);">不足</span>'}</td>
+    </tr></tfoot></table></div>`;
+    html += `<div style="font-size:0.7rem;color:var(--text-light);margin-top:4px;">収益性 = 単価 × 架電toアポ率（基準: 7.5以上）</div>`;
+
+    // セクション4: アサイン適正判断
+    html += `<div class="section-title" style="margin-top:24px;">アサイン適正判断</div>`;
+    const memberAssessment = [];
+    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
+    activeMembers.forEach(member => {
+        const mPerf = allPerf.filter(d => d.member_name === member.member_name);
+        const mCallCount = sum(mPerf, 'call_count');
+        const mPrCount = sum(mPerf, 'pr_count');
+        const mAppoCount = sum(mPerf, 'appointment_count');
+        const callToPr = mCallCount > 0 ? mPrCount / mCallCount * 100 : 0;
+        const prToAppo = mPrCount > 0 ? mAppoCount / mPrCount * 100 : 0;
+        const callToAppo = mCallCount > 0 ? mAppoCount / mCallCount * 100 : 0;
+        memberAssessment.push({ name: member.member_name, team: member.team_name, callCount: mCallCount, callToPr, prToAppo, callToAppo });
+    });
+
+    html += `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+        <th>メンバー</th><th>チーム</th><th class="text-right">架電数</th>
+        <th class="text-right">架toPR率</th><th class="text-right">PRtoアポ率</th><th class="text-right">架toアポ率</th><th>状態</th>
+    </tr></thead><tbody>`;
+    memberAssessment.forEach(m => {
+        const status = m.callToAppo < 2 && m.callCount > 100 ? '要注意' : m.callCount < 50 ? '稼働少' : '正常';
+        const statusColor = status === '要注意' ? 'var(--primary-red)' : status === '稼働少' ? '#8a7a00' : '#86aaec';
+        html += `<tr>
+            <td>${escapeHtml(m.name)}</td><td>${escapeHtml(m.team)}</td>
+            <td class="text-right">${m.callCount.toLocaleString()}</td>
+            <td class="text-right">${m.callToPr.toFixed(1)}%</td>
+            <td class="text-right">${m.prToAppo.toFixed(1)}%</td>
+            <td class="text-right">${m.callToAppo.toFixed(1)}%</td>
+            <td style="color:${statusColor};font-weight:600;">${status}</td>
+        </tr>`;
+    });
+    html += `</tbody></table></div>`;
+
+    document.getElementById('mgmtSalesProgress').innerHTML = '';
+    document.getElementById('mgmtExecForecast').innerHTML = '';
+    document.getElementById('mgmtCapProgress').innerHTML = '';
+    document.getElementById('mgmtAssignmentAssess').innerHTML = '';
+    // 全HTMLをmgmtSalesProgressに入れる（セクション分けは内部で行っている）
+    document.getElementById('mgmtSalesProgress').innerHTML = html;
+}
+
+// ==================== Tab: 詳細分析サブナビ ====================
+function switchAnalysisSub(sub) {
+    currentAnalysisSub = sub;
+    document.querySelectorAll('.analysis-sub-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.sub === sub);
+    });
+    document.querySelectorAll('.analysis-sub-content').forEach(el => {
+        el.classList.toggle('hidden', el.id !== `analysisSub-${sub}`);
+    });
+}
+
+// ==================== Tab: 個人分析 ====================
+function renderIndividualAnalysis(filter) {
+    const ym = filter.month;
+    const excluded = getExcludedMembers(ym);
+    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
+    const teamNames = getActiveTeamNames(ym);
+
+    let html = '';
+    teamNames.forEach(teamName => {
+        const teamMembers = getTeamMembersForMonth(teamName, ym).filter(n => activeMembers.some(m => m.member_name === n));
+        if (teamMembers.length === 0) return;
+
+        html += `<div class="section-title">${escapeHtml(teamName)}</div>`;
+        html += `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+            <th>メンバー</th>
+            <th class="text-right">取得実績</th><th class="text-right">達成率</th>
+            <th class="text-right">実施確定</th><th class="text-right">達成率</th>
+            <th class="text-right">見込(未確認)</th>
+            <th class="text-right">架toア</th>
+            <th>状態</th>
+        </tr></thead><tbody>`;
+
+        teamMembers.forEach(memberName => {
+            const mTarget = getTarget('member', memberName, ym);
+            const acqTarget = mTarget ? (parseFloat(mTarget.appointment_amount_target) || 0) : 0;
+            const execTarget = mTarget ? (parseFloat(mTarget.execution_target) || 0) : 0;
+
+            const mPerf = performanceData.filter(d => d.member_name === memberName);
+            const mAppo = appointmentsData.filter(d => d.member_name === memberName);
+            const mExec = executionAppoData.filter(d => d.member_name === memberName);
+
+            const appoAmount = sum(mPerf, 'appointment_amount');
+            const callCount = sum(mPerf, 'call_count');
+            const prCount = sum(mPerf, 'pr_count');
+            const appoCount = sum(mPerf, 'appointment_count');
+
+            const execConfirmed = mExec.filter(a => a.status === '実施').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+            const execUnconfirmed = mExec.filter(a => a.status === '未確認').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+            const execCancelled = mExec.filter(a => a.status === 'キャンセル').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+            const execReschedule = mExec.filter(a => a.status === 'リスケ').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+
+            const acqAchieve = acqTarget > 0 ? Math.round(appoAmount / acqTarget * 100) : 0;
+            const execAchieve = execTarget > 0 ? Math.round(execConfirmed / execTarget * 100) : 0;
+            const callToPr = callCount > 0 ? (prCount / callCount * 100).toFixed(1) : '-';
+            const prToAppo = prCount > 0 ? (appoCount / prCount * 100).toFixed(1) : '-';
+            const callToAppo = callCount > 0 ? (appoCount / callCount * 100).toFixed(1) : '-';
+
+            const hasIssue = (callToAppo !== '-' && parseFloat(callToAppo) < 3 && callCount > 100);
+            const statusLabel = hasIssue ? '要注意' : callCount < 50 ? '稼働少' : '正常';
+            const statusColor = hasIssue ? 'var(--primary-red)' : callCount < 50 ? '#8a7a00' : '#86aaec';
+            html += `<tr>
+                <td style="font-weight:600;">${escapeHtml(memberName)}</td>
+                <td class="text-right">¥${appoAmount.toLocaleString()}</td>
+                <td class="text-right" style="color:${acqAchieve >= 80 ? '#86aaec' : 'var(--primary-red)'};">${acqAchieve}%</td>
+                <td class="text-right">¥${execConfirmed.toLocaleString()}</td>
+                <td class="text-right" style="color:${execAchieve >= 80 ? '#86aaec' : 'var(--primary-red)'};">${execAchieve}%</td>
+                <td class="text-right">¥${execUnconfirmed.toLocaleString()}</td>
+                <td class="text-right">${callToAppo}%</td>
+                <td style="color:${statusColor};font-weight:600;">${statusLabel}</td>
+            </tr>`;
+        });
+        html += `</tbody></table></div>`;
+    });
+
+    document.getElementById('individualAnalysisContent').innerHTML = html || '<p style="color:var(--text-light);padding:24px;">データがありません</p>';
+}
+
+// ==================== Tab 1: 概要（レガシー・未使用） ====================
 function renderOverview(perfData, appoData, execAppoData, filter) {
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
@@ -852,7 +1381,7 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
                             <div class="progress-bar-fill" style="width:${Math.min(acqRate, 100)}%;background:${barColor};"></div>
                             <div class="progress-bar-line" style="left:${Math.min(standardProgress, 100)}%;"></div>
                         </div>
-                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(target / 10000).toFixed(0)}万 | ${acqRate}%</div>
+                        <div style="font-size:0.75rem;color:var(--text-light);">目標 ¥${(target / 10000).toFixed(0)}万 | ${acqRate}%</div>
                         ` : ''}
                     </div>
                     <div>
@@ -863,14 +1392,14 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
                             <div class="progress-bar-fill" style="width:${Math.min(confirmedRate, 100)}%;background:${confirmedBarColor};"></div>
                             <div class="progress-bar-line" style="left:${Math.min(standardProgress, 100)}%;"></div>
                         </div>
-                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(execTarget / 10000).toFixed(0)}万 | ${confirmedRate}%</div>
+                        <div style="font-size:0.75rem;color:var(--text-light);">目標 ¥${(execTarget / 10000).toFixed(0)}万 | ${confirmedRate}%</div>
                         ` : ''}
                     </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border-color);">
-                    <span style="font-size:0.65rem;color:var(--text-light);">実施見込</span>
+                    <span style="font-size:0.75rem;color:var(--text-light);">実施見込</span>
                     <span style="font-size:0.8rem;font-weight:600;font-family:'Poppins',sans-serif;">¥${execForecast.toLocaleString()}</span>
-                    <span style="font-size:0.6rem;color:var(--text-light);">（未確認+実施）</span>
+                    <span style="font-size:0.75rem;color:var(--text-light);">（未確認+実施）</span>
                 </div>
             </div>
         `;
@@ -922,7 +1451,7 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
                             <div class="progress-bar-fill" style="width:${Math.min(acqRate, 100)}%;background:${acqBarColor};"></div>
                             <div class="progress-bar-line" style="left:${Math.min(standardProgress || 0, 100)}%;"></div>
                         </div>
-                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(acqTarget / 10000).toFixed(0)}万 | ${acqRate}%</div>
+                        <div style="font-size:0.75rem;color:var(--text-light);">目標 ¥${(acqTarget / 10000).toFixed(0)}万 | ${acqRate}%</div>
                         ` : ''}
                     </div>
                     <div>
@@ -933,14 +1462,14 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
                             <div class="progress-bar-fill" style="width:${Math.min(confirmedRate, 100)}%;background:${confirmedBarColor};"></div>
                             <div class="progress-bar-line" style="left:${Math.min(standardProgress || 0, 100)}%;"></div>
                         </div>
-                        <div style="font-size:0.65rem;color:var(--text-light);">目標 ¥${(execTarget / 10000).toFixed(0)}万 | ${confirmedRate}%</div>
+                        <div style="font-size:0.75rem;color:var(--text-light);">目標 ¥${(execTarget / 10000).toFixed(0)}万 | ${confirmedRate}%</div>
                         ` : ''}
                     </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border-color);">
-                    <span style="font-size:0.65rem;color:var(--text-light);">実施見込</span>
+                    <span style="font-size:0.75rem;color:var(--text-light);">実施見込</span>
                     <span style="font-size:0.8rem;font-weight:600;font-family:'Poppins',sans-serif;">¥${execForecast.toLocaleString()}</span>
-                    <span style="font-size:0.6rem;color:var(--text-light);">（未確認+実施）</span>
+                    <span style="font-size:0.75rem;color:var(--text-light);">（未確認+実施）</span>
                 </div>
             </div>
         `;
@@ -1152,17 +1681,45 @@ function renderAppointments() {
         </div>
     `;
 
+    // アポ用メンバー・案件フィルタドロップダウン更新
+    const appoMemberFilter = document.getElementById('appoMemberFilter');
+    const appoProjectFilter = document.getElementById('appoProjectFilter');
+    if (appoMemberFilter) {
+        const currentMember = appoMemberFilter.value;
+        const members = [...new Set(summaryData.map(a => a.member_name).filter(Boolean))].sort();
+        appoMemberFilter.innerHTML = '<option value="all">全担当者</option>' +
+            members.map(m => `<option value="${m}">${displayName(m)}</option>`).join('');
+        appoMemberFilter.value = members.includes(currentMember) ? currentMember : 'all';
+    }
+    if (appoProjectFilter) {
+        const currentProject = appoProjectFilter.value;
+        const projects = [...new Set(summaryData.map(a => a.project_name).filter(Boolean))].sort();
+        appoProjectFilter.innerHTML = '<option value="all">全案件</option>' +
+            projects.map(p => `<option value="${p}">${p}</option>`).join('');
+        appoProjectFilter.value = projects.includes(currentProject) ? currentProject : 'all';
+    }
+
     // テーブル用データ: summaryData（今日までフィルタ済み） + ステータスフィルタ
     let filtered = currentAppoFilter === 'all' ? summaryData : summaryData.filter(a => a.status === currentAppoFilter);
+
+    // メンバーフィルタ
+    const selectedMember = appoMemberFilter ? appoMemberFilter.value : 'all';
+    if (selectedMember !== 'all') {
+        filtered = filtered.filter(a => a.member_name === selectedMember);
+    }
+
+    // 案件フィルタ
+    const selectedProject = appoProjectFilter ? appoProjectFilter.value : 'all';
+    if (selectedProject !== 'all') {
+        filtered = filtered.filter(a => a.project_name === selectedProject);
+    }
 
     // 検索フィルタ
     const searchInput = document.getElementById('appoSearchInput');
     const searchQuery = searchInput ? searchInput.value.trim().toLowerCase() : '';
     if (searchQuery) {
         filtered = filtered.filter(a =>
-            (a.customer_name || '').toLowerCase().includes(searchQuery) ||
-            (a.project_name || '').toLowerCase().includes(searchQuery) ||
-            (a.member_name || '').toLowerCase().includes(searchQuery)
+            (a.customer_name || '').toLowerCase().includes(searchQuery)
         );
     }
 
@@ -1173,11 +1730,11 @@ function renderAppointments() {
                            a.status === 'リスケ' ? 'status-rescheduled' : 'status-cancelled';
         return `
             <tr>
-                <td>${a.acquisition_date || '-'}</td>
+                <td>${formatDateDisplay(a.acquisition_date)}</td>
                 <td>${displayName(a.member_name)}</td>
                 <td>${a.project_name}</td>
                 <td>${a.customer_name || '-'}</td>
-                <td>${a.scheduled_date || '-'}</td>
+                <td>${formatDateDisplay(a.scheduled_date)}</td>
                 <td class="text-right number">¥${(a.amount || 0).toLocaleString()}</td>
                 <td><span class="status-badge ${statusClass}">${a.status}</span></td>
                 <td>
@@ -1368,10 +1925,8 @@ function renderYield(perfData, filter) {
                 <td class="text-right number">${c.toLocaleString()}</td>
                 <td class="text-right number">${p.toLocaleString()}</td>
                 <td class="text-right number">${a}</td>
-                <td class="text-right number">${e}</td>
                 <td class="text-right number"${redStyle(ctp, BL_CTP)}>${ctp}%</td>
                 <td class="text-right number"${redStyle(pta, BL_PTA)}>${pta}%</td>
-                <td class="text-right number">${ate}%</td>
                 <td class="text-right number"${redStyle(cta, BL_CTA)}>${cta}%</td>
             </tr>
         `;
@@ -1385,10 +1940,8 @@ function renderYield(perfData, filter) {
             <td class="text-right number">${totalCalls.toLocaleString()}</td>
             <td class="text-right number">${totalPR.toLocaleString()}</td>
             <td class="text-right number">${totalAppo}</td>
-            <td class="text-right number">${totalExecCount}</td>
             <td class="text-right number"${redStyle(callToPR.toFixed(1), BL_CTP)}>${callToPR.toFixed(1)}%</td>
             <td class="text-right number"${redStyle(prToAppo.toFixed(1), BL_PTA)}>${prToAppo.toFixed(1)}%</td>
-            <td class="text-right number">${totalAte}%</td>
             <td class="text-right number"${redStyle(callToAppo.toFixed(2), BL_CTA)}>${callToAppo.toFixed(2)}%</td>
         </tr>
     `;
@@ -1534,7 +2087,7 @@ function renderProjectYield(perfData) {
         const proj = projectsData.find(pr => pr.project_name === name);
         const unitPrice = proj ? proj.unit_price : (p.appo > 0 ? Math.round(p.amount / p.appo) : 0);
         const profitCheck = p.calls > 0 ? unitPrice * p.appo / p.calls : 0;
-        const profitAlert = p.calls > 0 && profitCheck < 7;
+        const profitAlert = p.calls > 0 && profitCheck < 7.5;
 
         // 各指標の診断
         const actCtp = p.calls > 0 ? p.pr / p.calls : 0;
@@ -1552,7 +2105,7 @@ function renderProjectYield(perfData) {
         } else {
             if (ctpLow) badges += `<span class="yield-alert-badge alert" title="架電to着電率: ${(actCtp*100).toFixed(1)}%（基準${(BASELINE.callToPR*100)}%）">着電率↓</span>`;
             if (ptaLow) badges += `<span class="yield-alert-badge alert" title="着電toアポ率: ${(actPta*100).toFixed(1)}%（基準${(BASELINE.prToAppo*100)}%）">アポ率↓</span>`;
-            if (profitAlert) badges += `<span class="yield-alert-badge alert" title="単価×架toア = ${profitCheck.toFixed(1)}（基準: 7以上）">収益性↓</span>`;
+            if (profitAlert) badges += `<span class="yield-alert-badge alert" title="単価×架toア = ${profitCheck.toFixed(1)}（基準: 7.5以上）">収益性↓</span>`;
         }
 
         // 詳細行（クリックで展開）
@@ -1563,7 +2116,7 @@ function renderProjectYield(perfData) {
             if (ctpLow) details.push(`架電to着電率 ${(actCtp*100).toFixed(1)}%（基準 ${(BASELINE.callToPR*100)}%、乖離 ${((actCtp/BASELINE.callToPR-1)*100).toFixed(0)}%） → リスト品質・時間帯の見直し`);
             if (ptaLow) details.push(`着電toアポ率 ${(actPta*100).toFixed(1)}%（基準 ${(BASELINE.prToAppo*100)}%、乖離 ${((actPta/BASELINE.prToAppo-1)*100).toFixed(0)}%） → トークスクリプト改善・ヒアリング精度向上`);
             if (ctaLow) details.push(`架電toアポ率 ${(actCta*100).toFixed(2)}%（基準 ${(BASELINE.callToAppo*100)}%、乖離 ${((actCta/BASELINE.callToAppo-1)*100).toFixed(0)}%） → リスト品質とトーク品質の両面から改善`);
-            if (profitAlert) details.push(`収益性指標 ${profitCheck.toFixed(1)}（基準: 7以上） → 単価またはアポ率の改善が必要`);
+            if (profitAlert) details.push(`収益性指標 ${profitCheck.toFixed(1)}（基準: 7.5以上） → 単価またはアポ率の改善が必要`);
 
             detailCells = `<tr id="${rowId}" class="yield-detail-row" style="display:none;">
                 <td colspan="8" style="padding:12px 16px;background:var(--gray-50);">
@@ -1593,7 +2146,7 @@ function renderProjectYield(perfData) {
             const gaps = [];
             if (ctpLow) gaps.push({ label: '架電to着電率', actual: actCtp, baseline: BASELINE.callToPR, suggestion: 'リスト品質・時間帯の見直し' });
             if (ptaLow) gaps.push({ label: '着電toアポ率', actual: actPta, baseline: BASELINE.prToAppo, suggestion: 'トークスクリプト改善・ヒアリング精度向上' });
-            if (profitAlert) gaps.push({ label: '収益性', actual: profitCheck, baseline: 7, isIndex: true, suggestion: '単価またはアポ率の改善が必要' });
+            if (profitAlert) gaps.push({ label: '収益性', actual: profitCheck, baseline: 7.5, isIndex: true, suggestion: '単価またはアポ率の改善が必要' });
 
             const tags = gaps.map(g => {
                 if (g.isIndex) return `<span class="diagnosis-tag alert">${g.label}: ${g.actual.toFixed(1)}（基準: ${g.baseline}以上） → ${g.suggestion}</span>`;
@@ -1877,33 +2430,20 @@ function renderAssignments() {
         const progressColor = a._progress >= 100 ? 'var(--success)' : a._progress >= 70 ? '#ede07d' : '#ef947a';
         const progressWidth = Math.min(a._progress, 100);
 
+        const ctaColor = a._callToAppo !== '-' && parseFloat(a._callToAppo) < 3 ? 'var(--primary-red)' : '';
         rows += `
             <tr>
-                <td>${a.project_name}</td>
-                <td><span class="type-badge ${a.project_type === '成果報酬' ? 'seika' : 'kadou'}">${a.project_type || '-'}</span></td>
-                <td>${a.pm_name || '-'}</td>
+                <td>${a.project_name}${a.sheet_url ? ` <a href="${escapeHtml(a.sheet_url)}" target="_blank" title="シート" style="font-size:0.75rem;">📋</a>` : ''}</td>
                 <td>${displayName(a.member_name)}</td>
-                <td class="text-right number">${a.cap_count || '-'}</td>
-                <td class="text-right number">${a.cap_amount ? '¥' + a.cap_amount.toLocaleString() : '-'}</td>
-                <td class="text-right number">${a.target_count || '-'}</td>
-                <td class="text-right number">${a._calls}</td>
-                <td class="text-right number">${a._pr}</td>
+                <td class="text-right number">${a._calls.toLocaleString()}</td>
                 <td class="text-right number">${a._appo}</td>
-                <td class="text-right number">${a._callToPR}%</td>
-                <td class="text-right number">${a._prToAppo}%</td>
-                <td class="text-right number">${a._callToAppo}%</td>
+                <td class="text-right number" style="color:${ctaColor};font-weight:600;">${a._callToAppo}%${a._hasAlert ? ' ⚠' : ''}</td>
                 <td class="text-right number">¥${a._confirmedAmount.toLocaleString()}</td>
-                <td class="text-right number">¥${a._pendingAmount.toLocaleString()}</td>
-                <td class="text-right number">${a._approvalRate}%</td>
                 <td>
-                    <div class="progress-bar" style="width:80px;">
+                    <div class="progress-bar" style="width:50px;display:inline-block;vertical-align:middle;">
                         <div class="progress-bar-fill" style="width:${progressWidth}%;background:${progressColor};"></div>
                     </div>
                     <span class="number" style="font-size:0.75rem;">${a._progress}%</span>
-                </td>
-                <td>${a._hasAlert ? '<span class="alert-flag">⚠</span>' : ''}</td>
-                <td>
-                    ${a.sheet_url ? `<a href="${escapeHtml(a.sheet_url)}" target="_blank" class="link-btn" title="シート">📋</a>` : ''}
                 </td>
                 <td>
                     <button class="icon-btn" onclick="openAssignmentForm('${a.id}')" title="編集">✏️</button>
@@ -1913,7 +2453,7 @@ function renderAssignments() {
         `;
     });
 
-    document.getElementById('assignmentTableBody').innerHTML = rows || '<tr><td colspan="21" style="text-align:center;color:var(--text-light);padding:20px;">アサインが登録されていません。「+ 新規アサイン」から追加してください。</td></tr>';
+    document.getElementById('assignmentTableBody').innerHTML = rows || '<tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:20px;">アサインが登録されていません。「+ 新規アサイン」から追加してください。</td></tr>';
     document.getElementById('assignmentCount').textContent = `${filtered.length}件`;
 }
 
@@ -1939,7 +2479,17 @@ function openAssignmentForm(editId) {
             document.getElementById('assignmentFormTitle').textContent = 'アサイン編集';
             memberSelect.value = a.member_name;
             projectSelect.value = a.project_name;
-            document.getElementById('asgFormType').value = a.project_type || '成果報酬';
+            const typeSelect = document.getElementById('asgFormType');
+            const typeVal = a.project_type || '成果報酬';
+            typeSelect.value = typeVal;
+            // 値がオプションに存在しない場合、オプションを動的追加
+            if (typeSelect.value !== typeVal) {
+                const opt = document.createElement('option');
+                opt.value = typeVal;
+                opt.textContent = typeVal;
+                typeSelect.appendChild(opt);
+                typeSelect.value = typeVal;
+            }
             document.getElementById('asgFormPM').value = a.pm_name || '';
             document.getElementById('asgFormCapCount').value = a.cap_count || '';
             document.getElementById('asgFormCapAmount').value = a.cap_amount || '';
@@ -2274,16 +2824,21 @@ function renderAnalysisChart(perfData, filter) {
     if (charts.analysis) charts.analysis.destroy();
 
     const ctx = document.getElementById('analysisChart').getContext('2d');
+    const isDaily = currentAnalysisView === 'daily';
     charts.analysis = new Chart(ctx, {
-        type: 'bar',
+        type: isDaily ? 'line' : 'bar',
         data: {
             labels: labels,
             datasets: [{
                 label: label,
                 data: dataValues,
-                backgroundColor: color + '80',
+                backgroundColor: isDaily ? color + '15' : color + '80',
                 borderColor: color,
-                borderWidth: 1
+                borderWidth: isDaily ? 2 : 1,
+                fill: isDaily,
+                tension: 0.3,
+                pointRadius: isDaily ? 3 : 0,
+                pointBackgroundColor: color
             }]
         },
         options: {
@@ -2730,10 +3285,10 @@ function switchTab(tab) {
         content.classList.toggle('active', content.id === `tab-${tab}`);
     });
 
-    // 概要タブではフィルターを非表示、他タブでは表示
+    // 朝礼・経営タブではフィルターを非表示
     const filters = document.getElementById('globalFilters');
     if (filters) {
-        filters.style.display = tab === 'overview' ? 'none' : 'flex';
+        filters.style.display = (tab === 'morning' || tab === 'management') ? 'none' : 'flex';
     }
 
     // タブ切替時にチーム・メンバーフィルターをリセット（タブ間の影響を防止）
@@ -2784,6 +3339,14 @@ function showError(msg) {
 
 function formatDate(d) {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function formatDateDisplay(dateStr) {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    if (isNaN(d)) return dateStr;
+    const days = ['日','月','火','水','木','金','土'];
+    return `${d.getMonth()+1}/${d.getDate()}(${days[d.getDay()]})`;
 }
 
 function getEndOfMonth(ym) {
@@ -2885,7 +3448,7 @@ async function submitFeedback() {
     const mentions = FEEDBACK_MENTION_IDS.map(id => `<@${id}>`).join(' ');
     const reporterText = reporter ? `報告者: ${reporter}` : '報告者: 未選択';
 
-    const slackText = `${mentions}\n:mega: *【チーム900 DB】${type}*\n\n*${title}*\n${detail ? '\n' + detail + '\n' : ''}\n${reporterText}`;
+    const slackText = `${mentions}\n:mega: *【成果報酬 DB】${type}*\n\n*${title}*\n${detail ? '\n' + detail + '\n' : ''}\n${reporterText}`;
 
     try {
         // Slack Webhook経由で送信（GAS proxy）

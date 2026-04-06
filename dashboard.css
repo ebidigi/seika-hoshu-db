@@ -1591,3 +1591,273 @@ body {
         padding: 8px 10px;
     }
 }
+
+/* ==================== 稼働報酬Team ==================== */
+
+/* Sales Summary */
+.kadou-sales-summary {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+}
+
+.kadou-sales-main {
+    min-width: 140px;
+}
+
+.kadou-sales-label {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-bottom: 2px;
+}
+
+.kadou-sales-amount {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--text-dark);
+    font-family: 'Poppins', sans-serif;
+}
+
+.kadou-sales-bar-wrap {
+    flex: 1;
+    min-width: 200px;
+}
+
+.kadou-sales-bar {
+    height: 10px;
+    background: var(--gray-200);
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.kadou-sales-bar-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
+
+.kadou-sales-cards {
+    display: flex;
+    gap: 16px;
+}
+
+.kadou-sales-card {
+    text-align: center;
+    min-width: 100px;
+}
+
+.kadou-sales-card-label {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    margin-bottom: 2px;
+}
+
+.kadou-sales-card-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+    font-family: 'Poppins', sans-serif;
+}
+
+/* KPI Grid */
+.kadou-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.kadou-kpi-card {
+    background: var(--gray-100);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    text-align: center;
+}
+
+.kadou-kpi-card.highlight {
+    background: var(--blue-50);
+    border: 1px solid var(--blue-200);
+}
+
+.kadou-kpi-label {
+    font-size: 0.78rem;
+    color: var(--text-light);
+    margin-bottom: 4px;
+}
+
+.kadou-kpi-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    font-family: 'Poppins', sans-serif;
+    color: var(--text-dark);
+}
+
+.kadou-kpi-value.success { color: var(--success); }
+.kadou-kpi-value.warning { color: var(--warning); }
+.kadou-kpi-value.danger { color: var(--danger); }
+
+.kadou-kpi-detail {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+/* Progress toggles */
+.kadou-progress-toggles {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+
+/* Member Grid */
+.kadou-member-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.kadou-member-card {
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+}
+
+.kadou-member-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+    color: var(--text-dark);
+}
+
+.kadou-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.kadou-progress-label {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    width: 30px;
+    flex-shrink: 0;
+}
+
+.kadou-progress-bar-container {
+    flex: 1;
+}
+
+.kadou-progress-bar {
+    height: 8px;
+    background: var(--gray-200);
+    border-radius: 4px;
+    overflow: visible;
+    position: relative;
+}
+
+.kadou-progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.kadou-progress-fill.success { background: var(--success); }
+.kadou-progress-fill.warning { background: var(--warning); }
+.kadou-progress-fill.danger { background: var(--danger); }
+
+.kadou-target-line {
+    position: absolute;
+    top: -3px;
+    width: 2px;
+    height: 14px;
+    background: var(--text-dark);
+    border-radius: 1px;
+}
+
+.kadou-progress-value {
+    font-size: 0.8rem;
+    font-weight: 600;
+    width: 42px;
+    text-align: right;
+    flex-shrink: 0;
+    font-family: 'Poppins', sans-serif;
+}
+
+.kadou-progress-value.success { color: var(--success); }
+.kadou-progress-value.warning { color: var(--warning); }
+.kadou-progress-value.danger { color: var(--danger); }
+
+.kadou-stats-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+}
+
+.kadou-stat {
+    flex: 1;
+    text-align: center;
+    font-size: 0.78rem;
+}
+
+.kadou-stat-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+/* Settings input */
+.kadou-settings-input {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+    width: 160px;
+    text-align: right;
+    font-family: 'Poppins', sans-serif;
+}
+
+.kadou-settings-input:focus {
+    outline: none;
+    border-color: var(--primary-blue);
+    box-shadow: 0 0 0 2px rgba(17, 85, 204, 0.15);
+}
+
+/* Badge variants */
+.badge-info {
+    background: var(--info-light);
+    color: var(--info);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.badge-primary {
+    background: var(--blue-50);
+    color: var(--primary-blue);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Button small */
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 0.8rem;
+}
+
+@media (max-width: 768px) {
+    .kadou-sales-summary {
+        flex-direction: column;
+        gap: 12px;
+    }
+    .kadou-member-grid {
+        grid-template-columns: 1fr;
+    }
+    .kadou-kpi-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}

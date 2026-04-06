@@ -469,13 +469,34 @@ body {
 .sales-target-label {
     font-size: 0.85rem;
     opacity: 0.85;
-    margin-bottom: 4px;
+    margin-bottom: 8px;
 }
 
 .sales-target-amount {
     font-family: 'Poppins', sans-serif;
-    font-size: 2rem;
+    font-size: 1.8rem;
     font-weight: 700;
+}
+
+.sales-target-goals {
+    display: flex;
+    gap: 16px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    opacity: 0.95;
+    margin-bottom: 2px;
+}
+
+.sales-target-goals span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.sales-target-goals .goal-label {
+    font-size: 0.8rem;
+    font-weight: 400;
+    opacity: 0.7;
 }
 
 .sales-target-bar-wrap {
@@ -651,7 +672,7 @@ body {
 }
 
 .member-stat-label {
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     color: var(--text-light);
 }
 
@@ -735,7 +756,7 @@ body {
 
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { background: var(--gray-200); }
-.sort-icon { font-size: 0.65rem; color: var(--primary-blue); margin-left: 2px; }
+.sort-icon { font-size: 0.75rem; color: var(--primary-blue); margin-left: 2px; }
 
 .data-table td {
     padding: 10px 12px;
@@ -786,7 +807,7 @@ th.sortable:hover { background: var(--gray-200); }
     right: -6px;
     background: var(--primary-red);
     color: white;
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     font-weight: 700;
     width: 20px;
     height: 20px;
@@ -1537,7 +1558,7 @@ th.sortable:hover { background: var(--gray-200); }
 /* ========== 案件別歩留まりアラートバッジ ========== */
 .yield-alert-badge {
     display: inline-block;
-    font-size: 0.68rem;
+    font-size: 0.75rem;
     font-weight: 600;
     padding: 2px 7px;
     border-radius: 4px;
@@ -1827,6 +1848,285 @@ th.sortable:hover { background: var(--gray-200); }
     background: var(--blue-50);
     color: var(--primary-blue);
     border-color: var(--primary-blue);
+}
+
+/* ========== 朝礼タブ ========== */
+.morning-team-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+.morning-team-card {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.morning-team-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--blue-50);
+    border-bottom: 1px solid var(--border-color);
+}
+.morning-team-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text-dark);
+}
+.morning-team-members {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    background: rgba(0,0,0,0.06);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+.morning-team-body {
+    padding: 12px 14px;
+}
+.morning-metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+}
+.morning-metric-label {
+    font-size: 0.8rem;
+    color: var(--text-light);
+}
+.morning-metric-value {
+    font-size: 0.85rem;
+    color: var(--text-dark);
+}
+.morning-progress-bar {
+    position: relative;
+    height: 6px;
+    background: var(--bg-light);
+    border-radius: 3px;
+    margin: 4px 0;
+    overflow: visible;
+}
+.morning-progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+.morning-progress-standard {
+    position: absolute;
+    top: -2px;
+    width: 2px;
+    height: 10px;
+    background: var(--text-dark);
+    border-radius: 1px;
+}
+.morning-exec-warning {
+    color: var(--primary-red) !important;
+    font-weight: 700 !important;
+}
+.morning-exec-rate {
+    background: rgba(134,170,236,0.15);
+    color: #86aaec;
+}
+.morning-exec-rate.warning {
+    background: rgba(239,148,122,0.15);
+    color: var(--primary-red);
+}
+
+/* 朝礼 KPIカード（1カード1指標） */
+.morning-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.morning-kpi-card {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px 20px;
+}
+.morning-kpi-card.morning-kpi-warn {
+    border-color: var(--primary-red);
+    background: #fff5f3;
+}
+.morning-kpi-label {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-bottom: 4px;
+}
+.morning-kpi-value {
+    font-family: 'Poppins', sans-serif;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--text-dark);
+    line-height: 1.2;
+}
+.morning-kpi-sub {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-top: 2px;
+}
+.morning-kpi-bar {
+    position: relative;
+    height: 8px;
+    background: var(--bg-light);
+    border-radius: 4px;
+    margin: 8px 0 4px;
+    overflow: visible;
+}
+.morning-kpi-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+.morning-kpi-bar-std {
+    position: absolute;
+    top: -2px;
+    width: 2px;
+    height: 12px;
+    background: var(--text-dark);
+    border-radius: 1px;
+}
+.morning-kpi-detail {
+    font-size: 0.9rem;
+    color: var(--text-mid);
+    margin-top: 4px;
+    font-weight: 500;
+}
+@media (max-width: 768px) {
+    .morning-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* 朝礼 比較テーブル */
+.morning-table-wrap {
+    overflow-x: auto;
+}
+.morning-compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+.morning-compare-table th {
+    background: var(--blue-50);
+    padding: 10px 12px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    color: var(--text-light);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-bottom: 2px solid var(--border-color);
+    white-space: nowrap;
+}
+.morning-compare-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+.morning-compare-table tbody tr:hover {
+    background: var(--blue-50);
+}
+.morning-team-cell {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.morning-member-count {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-light);
+    margin-left: 6px;
+}
+.morning-total-row {
+    background: var(--blue-50) !important;
+}
+.morning-total-row td {
+    border-top: 2px solid var(--primary-blue);
+    border-bottom: none;
+}
+.morning-inline-bar {
+    position: relative;
+    height: 8px;
+    background: var(--bg-light);
+    border-radius: 4px;
+    min-width: 60px;
+    overflow: visible;
+}
+.morning-inline-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+.morning-inline-standard {
+    position: absolute;
+    top: -1px;
+    width: 2px;
+    height: 10px;
+    background: var(--text-dark);
+    border-radius: 1px;
+}
+
+/* ========== 経営タブ ========== */
+.mgmt-progress-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.mgmt-progress-card {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px;
+}
+.mgmt-progress-label {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-bottom: 4px;
+}
+.mgmt-progress-amount {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-dark);
+}
+.mgmt-progress-rate {
+    font-size: 0.85rem;
+}
+.mgmt-progress-sub {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    margin-top: 4px;
+}
+
+/* ========== 詳細分析サブナビ ========== */
+.analysis-sub-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0;
+}
+.analysis-sub-btn {
+    padding: 8px 16px;
+    border: none;
+    background: transparent;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-light);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.15s;
+}
+.analysis-sub-btn:hover {
+    color: var(--primary-blue);
+}
+.analysis-sub-btn.active {
+    color: var(--primary-blue);
+    border-bottom-color: var(--primary-blue);
+    font-weight: 600;
+}
+.analysis-sub-content.hidden {
+    display: none;
 }
 
 /* ========== 印刷 ========== */

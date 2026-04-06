@@ -140,27 +140,40 @@ CREATE INDEX IF NOT EXISTS idx_mth_ym ON member_team_history(year_month);
 CREATE INDEX IF NOT EXISTS idx_mth_member ON member_team_history(member_name);
 
 -- 初期データ: チーム
+INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('三善Team', '三善');
+INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('轟Team', '轟');
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('野口Team', '野口');
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('松居Team', '松居');
 INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('坪井Team', '坪井');
-INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('宮城Team', '宮城');
-INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('三善Team', '三善');
-INSERT OR IGNORE INTO teams (team_name, leader_name) VALUES ('菊池Team', '菊池');
+INSERT OR IGNORE INTO teams (team_name, leader_name, status) VALUES ('菊池Team', '菊池', 'inactive');
+INSERT OR IGNORE INTO teams (team_name, leader_name, status) VALUES ('宮城Team', '宮城', 'inactive');
 
 -- 初期データ: メンバー
+-- 三善Team
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('三善', '三善Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('宮城', '三善Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中颯汰', '三善Team');
+-- 轟Team
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('轟', '轟Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('堀切', '轟Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田端', '轟Team');
+-- 野口Team
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('野口', '野口Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('中村た', '野口Team');
-INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中か', '野口Team');
-INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('辻森', '野口Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('野上', '野口Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('村上', '野口Team');
+-- 松居Team
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('松居', '松居Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('山本', '松居Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('美除', '松居Team');
+-- 坪井Team
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('坪井', '坪井Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('池田', '坪井Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('村松', '坪井Team');
-INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中颯汰', '坪井Team');
-INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('宮城', '宮城Team');
-INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('三善', '三善Team');
-INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('菊池', '菊池Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中か', '三善Team');
+-- 非アクティブ
+INSERT OR IGNORE INTO members (member_name, team_name, status) VALUES ('菊池', '菊池Team', 'inactive');
+INSERT OR IGNORE INTO members (member_name, team_name, status) VALUES ('辻森', '野口Team', 'inactive');
 
 -- 案件×メンバー アサイン管理（月次）
 CREATE TABLE IF NOT EXISTS project_member_assignments (

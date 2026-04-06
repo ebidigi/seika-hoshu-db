@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>チーム900 管理DB | DigiMan</title>
+    <title>成果報酬 管理DB | DigiMan</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -26,7 +26,7 @@
     <header class="top-header" id="topHeader">
         <div class="logo">
             <span class="logo-text">DigiMan</span>
-            <span style="font-size:0.85rem;color:var(--text-light);margin-left:4px;">チーム900</span>
+            <span style="font-size:0.85rem;color:var(--text-light);margin-left:4px;">成果報酬</span>
         </div>
         <div class="header-right">
             <span class="last-updated" id="lastUpdated"></span>
@@ -43,12 +43,23 @@
         <!-- サイドバー -->
         <aside class="sidebar" id="sidebar">
             <nav class="sidebar-nav">
-                <button class="sidebar-item active" data-tab="overview" onclick="switchTab('overview')">
+                <button class="sidebar-item active" data-tab="morning" onclick="switchTab('morning')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                        <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
                     </svg>
-                    <span class="sidebar-item-text">概要</span>
+                    <span class="sidebar-item-text">朝礼</span>
+                </button>
+                <button class="sidebar-item" data-tab="analysis" onclick="switchTab('analysis')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 20V10M12 20V4M6 20v-6"/>
+                    </svg>
+                    <span class="sidebar-item-text">詳細分析</span>
+                </button>
+                <button class="sidebar-item" data-tab="management" onclick="switchTab('management')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+                    </svg>
+                    <span class="sidebar-item-text">経営</span>
                 </button>
                 <button class="sidebar-item" data-tab="appointments" onclick="switchTab('appointments')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -61,18 +72,6 @@
                         <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/>
                     </svg>
                     <span class="sidebar-item-text">案件管理</span>
-                </button>
-                <button class="sidebar-item" data-tab="yield" onclick="switchTab('yield')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-                    </svg>
-                    <span class="sidebar-item-text">歩留まり</span>
-                </button>
-                <button class="sidebar-item" data-tab="analysis" onclick="switchTab('analysis')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M18 20V10M12 20V4M6 20v-6"/>
-                    </svg>
-                    <span class="sidebar-item-text">詳細分析</span>
                 </button>
                 <button class="sidebar-item" data-tab="settings" onclick="switchTab('settings')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -97,7 +96,7 @@
             <div class="dashboard">
                 <div class="page-title-row">
                     <div class="page-title">
-                        <h1>チーム900 管理DB<span class="progress-badge" id="progressBadge">標準進捗: --%</span></h1>
+                        <h1>成果報酬 管理DB<span class="progress-badge" id="progressBadge">標準進捗: --%</span></h1>
                         <p class="subtitle" id="dateInfo">読み込み中...</p>
                     </div>
                     <div class="filter-section" id="globalFilters">
@@ -122,21 +121,12 @@
 
                 <div class="error-message" id="errorMessage"></div>
 
-                <!-- Tab 1: 概要 -->
-                <div class="tab-content active" id="tab-overview">
-                    <div id="salesTargetCard"></div>
-                    <div id="alertBanners"></div>
-                    <div id="todaySummary"></div>
-                    <div id="conversionRates"></div>
-
-                    <div class="section-title">チーム別 売上進捗</div>
-                    <div id="teamCards"></div>
-
-                    <div class="section-title">メンバー別 売上</div>
-                    <div id="memberSalesCards"></div>
-
-                    <div class="section-title">メンバー別 稼働実績</div>
-                    <div id="memberGraphs"></div>
+                <!-- Tab 1: 朝礼 -->
+                <div class="tab-content active" id="tab-morning">
+                    <div id="morningKpiBar"></div>
+                    <div id="morningAlerts"></div>
+                    <div class="section-title">チーム別 進捗</div>
+                    <div id="morningTeamCards"></div>
                 </div>
 
                 <!-- Tab 2: アポ確認管理 -->
@@ -153,8 +143,14 @@
                             <button class="appo-status-tab" data-status="リスケ" onclick="filterAppoStatus('リスケ')">リスケ</button>
                             <button class="appo-status-tab" data-status="キャンセル" onclick="filterAppoStatus('キャンセル')">キャンセル</button>
                         </div>
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <input type="text" id="appoSearchInput" placeholder="顧客名・案件名・担当者で検索" oninput="renderAppointments()" style="padding:6px 12px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;width:220px;">
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                            <select id="appoMemberFilter" onchange="renderAppointments()" style="padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;">
+                                <option value="all">全担当者</option>
+                            </select>
+                            <select id="appoProjectFilter" onchange="renderAppointments()" style="padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;">
+                                <option value="all">全案件</option>
+                            </select>
+                            <input type="text" id="appoSearchInput" placeholder="顧客名で検索" oninput="renderAppointments()" style="padding:6px 12px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;width:160px;">
                             <button id="appoShowAllBtn" class="btn-secondary" onclick="toggleAppoRange()" style="font-size:0.8rem;padding:6px 14px;">全一覧を表示</button>
                         </div>
                     </div>
@@ -204,24 +200,12 @@
                             <thead>
                                 <tr>
                                     <th>案件名</th>
-                                    <th>タイプ</th>
-                                    <th>PM</th>
                                     <th>メンバー</th>
-                                    <th class="text-right">キャップ数</th>
-                                    <th class="text-right">キャップ金額</th>
-                                    <th class="text-right">目標数</th>
-                                    <th class="text-right">架電数</th>
-                                    <th class="text-right">PR数</th>
-                                    <th class="text-right">アポ数</th>
-                                    <th class="text-right">架toPR</th>
-                                    <th class="text-right">PRtoア</th>
+                                    <th class="text-right">架電</th>
+                                    <th class="text-right">アポ</th>
                                     <th class="text-right">架toア</th>
-                                    <th class="text-right">確定金額</th>
-                                    <th class="text-right">見込み</th>
-                                    <th class="text-right">承認率</th>
+                                    <th class="text-right">確定</th>
                                     <th>進捗</th>
-                                    <th>警告</th>
-                                    <th>シート</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -236,10 +220,10 @@
                                 <tr>
                                     <th>案件名</th>
                                     <th class="text-right">キャップ数</th>
-                                    <th class="text-right">実績数</th>
+                                    <th class="text-right">取得数</th>
                                     <th class="text-right">消化率</th>
                                     <th class="text-right">キャップ金額</th>
-                                    <th class="text-right">実績金額</th>
+                                    <th class="text-right">取得金額</th>
                                     <th>進捗</th>
                                 </tr>
                             </thead>
@@ -248,92 +232,108 @@
                     </div>
                 </div>
 
-                <!-- Tab 4: 歩留まり分析 -->
-                <div class="tab-content" id="tab-yield">
-                    <div class="section-title">歩留まりファネル</div>
-                    <div class="funnel-container" id="funnelContainer"></div>
-
-                    <div class="section-title">歩留まりレート比較</div>
-                    <div style="overflow-x:auto;">
-                        <table class="data-table" id="yieldTable">
-                            <thead>
-                                <tr>
-                                    <th>名前</th>
-                                    <th class="text-right">架電数</th>
-                                    <th class="text-right">PR数</th>
-                                    <th class="text-right">アポ数</th>
-                                    <th class="text-right">実施数</th>
-                                    <th class="text-right">架電toPR率</th>
-                                    <th class="text-right">PRtoアポ率</th>
-                                    <th class="text-right">アポto実施率</th>
-                                    <th class="text-right">架電toアポ率</th>
-                                </tr>
-                            </thead>
-                            <tbody id="yieldTableBody"></tbody>
-                        </table>
-                        <div style="font-size:0.7rem;color:var(--text-light);margin-top:6px;">基準値: 架電toPR率 15% / PRtoアポ率 30% / 架電toアポ率 3%（<span style="color:var(--primary-red);">赤字</span> = 基準未達）</div>
+                <!-- Tab 3: 詳細分析（実績+歩留まり+個人分析統合） -->
+                <div class="tab-content" id="tab-analysis">
+                    <!-- サブナビ -->
+                    <div class="analysis-sub-nav">
+                        <button class="analysis-sub-btn active" data-sub="performance" onclick="switchAnalysisSub('performance')">実績テーブル</button>
+                        <button class="analysis-sub-btn" data-sub="yield" onclick="switchAnalysisSub('yield')">歩留まり</button>
+                        <button class="analysis-sub-btn" data-sub="individual" onclick="switchAnalysisSub('individual')">個人分析</button>
                     </div>
 
-                    <div style="margin-top:32px;">
-                        <div class="section-title">診断・改善示唆</div>
-                        <div class="diagnosis-grid" id="diagnosisGrid"></div>
-                    </div>
-
-                    <div style="margin-top:32px;">
-                        <div class="section-title">案件別 歩留まり</div>
+                    <!-- 実績テーブル -->
+                    <div class="analysis-sub-content" id="analysisSub-performance">
+                        <div class="view-toggle">
+                            <button class="view-toggle-btn active" data-view="daily" onclick="switchAnalysisView('daily')">日次</button>
+                            <button class="view-toggle-btn" data-view="weekly" onclick="switchAnalysisView('weekly')">週次</button>
+                            <button class="view-toggle-btn" data-view="monthly" onclick="switchAnalysisView('monthly')">月次</button>
+                        </div>
+                        <div class="chart-section">
+                            <h3 id="analysisChartTitle" style="font-size:0.95rem;margin-bottom:12px;">日別トレンド</h3>
+                            <div class="chart-type-selector" id="analysisChartSelector">
+                                <button class="chart-type-btn active" data-chart="calls" onclick="switchAnalysisChart('calls')">架電数</button>
+                                <button class="chart-type-btn" data-chart="pr" onclick="switchAnalysisChart('pr')">PR数</button>
+                                <button class="chart-type-btn" data-chart="appo" onclick="switchAnalysisChart('appo')">アポ数</button>
+                                <button class="chart-type-btn" data-chart="amount" onclick="switchAnalysisChart('amount')">金額</button>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="analysisChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="section-title" id="analysisTableTitle">日次実績</div>
                         <div style="overflow-x:auto;">
-                            <table class="data-table" id="projectYieldTable">
+                            <table class="data-table" id="analysisTable">
+                                <thead id="analysisTableHead"></thead>
+                                <tbody id="analysisTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 歩留まり -->
+                    <div class="analysis-sub-content hidden" id="analysisSub-yield">
+                        <div class="section-title">歩留まりファネル</div>
+                        <div class="funnel-container" id="funnelContainer"></div>
+
+                        <div class="section-title">歩留まりレート比較</div>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table" id="yieldTable">
                                 <thead>
                                     <tr>
-                                        <th>案件名</th>
+                                        <th>名前</th>
                                         <th class="text-right">架電数</th>
                                         <th class="text-right">PR数</th>
                                         <th class="text-right">アポ数</th>
                                         <th class="text-right">架電toPR率</th>
                                         <th class="text-right">PRtoアポ率</th>
                                         <th class="text-right">架電toアポ率</th>
-                                        <th>アラート</th>
                                     </tr>
                                 </thead>
-                                <tbody id="projectYieldTableBody"></tbody>
+                                <tbody id="yieldTableBody"></tbody>
                             </table>
+                            <div style="font-size:0.7rem;color:var(--text-light);margin-top:6px;">基準値: 架電toPR率 15% / PRtoアポ率 30% / 架電toアポ率 3%（<span style="color:var(--primary-red);">赤字</span> = 基準未達）</div>
+                        </div>
+                        <div style="margin-top:32px;">
+                            <div class="section-title">診断・改善示唆</div>
+                            <div class="diagnosis-grid" id="diagnosisGrid"></div>
+                        </div>
+                        <div style="margin-top:32px;">
+                            <div class="section-title">案件別 歩留まり</div>
+                            <div style="overflow-x:auto;">
+                                <table class="data-table" id="projectYieldTable">
+                                    <thead>
+                                        <tr>
+                                            <th>案件名</th>
+                                            <th class="text-right">架電数</th>
+                                            <th class="text-right">PR数</th>
+                                            <th class="text-right">アポ数</th>
+                                            <th class="text-right">架電toPR率</th>
+                                            <th class="text-right">PRtoアポ率</th>
+                                            <th class="text-right">架電toアポ率</th>
+                                            <th>アラート</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="projectYieldTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div style="margin-top:32px;">
+                            <div class="section-title">案件別 診断・改善示唆</div>
+                            <div id="projectDiagnosisGrid"></div>
                         </div>
                     </div>
 
-                    <div style="margin-top:32px;">
-                        <div class="section-title">案件別 診断・改善示唆</div>
-                        <div id="projectDiagnosisGrid"></div>
+                    <!-- 個人分析 -->
+                    <div class="analysis-sub-content hidden" id="analysisSub-individual">
+                        <div id="individualAnalysisContent"></div>
                     </div>
                 </div>
 
-                <!-- Tab 5: 詳細分析 -->
-                <div class="tab-content" id="tab-analysis">
-                    <div class="view-toggle">
-                        <button class="view-toggle-btn active" data-view="daily" onclick="switchAnalysisView('daily')">日次</button>
-                        <button class="view-toggle-btn" data-view="weekly" onclick="switchAnalysisView('weekly')">週次</button>
-                        <button class="view-toggle-btn" data-view="monthly" onclick="switchAnalysisView('monthly')">月次</button>
-                    </div>
-
-                    <div class="chart-section">
-                        <h3 id="analysisChartTitle" style="font-size:0.95rem;margin-bottom:12px;">日別トレンド</h3>
-                        <div class="chart-type-selector" id="analysisChartSelector">
-                            <button class="chart-type-btn active" data-chart="calls" onclick="switchAnalysisChart('calls')">架電数</button>
-                            <button class="chart-type-btn" data-chart="pr" onclick="switchAnalysisChart('pr')">PR数</button>
-                            <button class="chart-type-btn" data-chart="appo" onclick="switchAnalysisChart('appo')">アポ数</button>
-                            <button class="chart-type-btn" data-chart="amount" onclick="switchAnalysisChart('amount')">金額</button>
-                        </div>
-                        <div class="chart-container">
-                            <canvas id="analysisChart"></canvas>
-                        </div>
-                    </div>
-
-                    <div class="section-title" id="analysisTableTitle">日次実績</div>
-                    <div style="overflow-x:auto;">
-                        <table class="data-table" id="analysisTable">
-                            <thead id="analysisTableHead"></thead>
-                            <tbody id="analysisTableBody"></tbody>
-                        </table>
-                    </div>
+                <!-- Tab 4: 経営 -->
+                <div class="tab-content" id="tab-management">
+                    <div id="mgmtSalesProgress"></div>
+                    <div id="mgmtExecForecast"></div>
+                    <div id="mgmtCapProgress"></div>
+                    <div id="mgmtAssignmentAssess"></div>
                 </div>
 
                 <!-- Tab 6: 設定 -->
@@ -351,43 +351,6 @@
                         <h3>実施目標設定</h3>
                         <div class="settings-grid" id="execTargetSettingsGrid"></div>
                         <button class="save-btn" onclick="saveTargets()">保存</button>
-                    </div>
-
-                    <!-- 日次目標 -->
-                    <div class="settings-section">
-                        <h3>日次目標入力</h3>
-                        <div class="settings-message" id="dailyTargetMessage"></div>
-                        <div class="form-grid">
-                            <div class="form-field">
-                                <label>メンバー</label>
-                                <select id="dailyTargetMember"></select>
-                            </div>
-                            <div class="form-field">
-                                <label>日付</label>
-                                <input type="date" id="dailyTargetDate">
-                            </div>
-                            <div class="form-field">
-                                <label>架電数目標</label>
-                                <input type="number" id="dailyTargetCalls" min="0">
-                            </div>
-                            <div class="form-field">
-                                <label>PR数目標</label>
-                                <input type="number" id="dailyTargetPR" min="0">
-                            </div>
-                            <div class="form-field">
-                                <label>アポ数目標</label>
-                                <input type="number" id="dailyTargetAppo" min="0">
-                            </div>
-                            <div class="form-field">
-                                <label>金額目標</label>
-                                <input type="number" id="dailyTargetAmount" min="0">
-                            </div>
-                            <div class="form-field full-width">
-                                <label>メモ</label>
-                                <textarea id="dailyTargetMemo" rows="2"></textarea>
-                            </div>
-                        </div>
-                        <button class="save-btn" onclick="saveDailyTarget()">保存</button>
                     </div>
 
                     <!-- デフォルトレート -->
@@ -538,7 +501,7 @@
                         <select id="asgFormProject" required></select>
                     </div>
                     <div class="form-field">
-                        <label>案件タイプ</label>
+                        <label>タイプ</label>
                         <select id="asgFormType">
                             <option value="成果報酬">成果報酬</option>
                             <option value="稼働報酬">稼働報酬</option>

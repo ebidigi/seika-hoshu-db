@@ -6,7 +6,7 @@ const TURSO_CONFIG = {
 
 // ==================== Global State ====================
 let currentPage = 'summary';
-let currentSubTab = { miyoshi: 'overview', kikuchi: 'overview' };
+let currentSubTab = { miyoshi: 'overview', kikuchi: 'overview', kadou: 'overview' };
 let membersData = [];
 let teamsData = [];
 let projectsData = [];
@@ -78,7 +78,7 @@ const MEMBER_NAME_NORMALIZE = {
     '轟玲音': '轟', '轟 玲音': '轟',
     '清水陸斗': '清水', '清水 陸斗': '清水',
     '堀切友世': '堀切', '堀切 友世': '堀切',
-    '田端音藍': 'タバタ', '田端 音藍': 'タバタ'
+    '田端音藍': '田端', '田端 音藍': '田端', 'タバタ': '田端'
 };
 
 function normalizeMemberName(name) {
@@ -414,6 +414,8 @@ function renderCurrentPage() {
         renderTeamSubTab('miyoshi', currentSubTab.miyoshi);
     } else if (currentPage === 'team-kikuchi') {
         renderTeamSubTab('kikuchi', currentSubTab.kikuchi);
+    } else if (currentPage === 'team-kadou') {
+        renderKadouSubTab(currentSubTab.kadou);
     }
 }
 
@@ -1724,3 +1726,1271 @@ async function submitFeedback() {
         btn.textContent = '送信';
     }
 }
+
+// ==================== 稼働報酬Team ====================
+const KADOU_GAS_URL = 'https://script.google.com/macros/s/AKfycbwG_1cvgfnnNuK9PuhmXJOSeBuS8kFzJbf-R1p0qvySu0BW8GYKJKCKzHJ4Ny11FtkV/exec';
+const KADOU_CACHE_TTL = 5 * 60 * 1000;
+
+// State
+let kadouMonthlyData = null;
+let kadouPipelineData = null;
+let kadouRawData = null;
+let kadouProgressMode = 'today';
+let kadouYesterdayProgress = 0;
+let kadouTodayProgress = 0;
+let kadouTomorrowProgress = 0;
+let kadouSelectedProjects = [];
+let kadouSelectedMembers = [];
+let kadouAnalysisSelectedProjects = [];
+let kadouAnalysisSelectedMembers = [];
+let kadouCurrentChartType = 'calls';
+let kadouCompareMonthEnabled = false;
+let kadouSettingsData = null;
+
+// Sub-tab navigation
+function switchKadouSubTab(sub) {
+    currentSubTab.kadou = sub;
+    const tabsEl = document.getElementById('kadouSubTabs');
+    tabsEl.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+    tabsEl.querySelector(`.sub-tab[data-sub="${sub}"]`).classList.add('active');
+    ['overview', 'analysis', 'yield', 'settings'].forEach(s => {
+        const el = document.getElementById('kadou-' + s);
+        if (s === sub) el.classList.remove('hidden');
+        else el.classList.add('hidden');
+    });
+    renderKadouSubTab(sub);
+}
+
+async function renderKadouSubTab(sub) {
+    switch (sub) {
+        case 'overview': await loadAndRenderKadouOverview(); break;
+        case 'analysis': await loadAndRenderKadouAnalysis(); break;
+        case 'yield': await loadAndRenderKadouYield(); break;
+        case 'settings': await loadAndRenderKadouSettings(); break;
+    }
+}
+
+// ---- Data fetching ----
+function kadouCacheGet(key) {
+    try {
+        const raw = localStorage.getItem('kadou_' + key);
+        if (!raw) return null;
+        const { data, ts } = JSON.parse(raw);
+        if (Date.now() - ts > KADOU_CACHE_TTL) { localStorage.removeItem('kadou_' + key); return null; }
+        return data;
+    } catch { return null; }
+}
+
+function kadouCacheSet(key, data) {
+    try { localStorage.setItem('kadou_' + key, JSON.stringify({ data, ts: Date.now() })); } catch {}
+}
+
+async function fetchKadouMonthly(month) {
+    const url = `${KADOU_GAS_URL}?type=monthly${month ? '&month=' + month : ''}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+}
+
+async function fetchKadouPipeline() {
+    const url = `${KADOU_GAS_URL}?type=pipeline_v2`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+}
+
+async function fetchKadouRawData(startDate, endDate) {
+    let url = `${KADOU_GAS_URL}?type=rawdata`;
+    if (startDate) url += '&startDate=' + startDate;
+    if (endDate) url += '&endDate=' + endDate;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+}
+
+async function fetchKadouSalesTargets() {
+    const url = `${KADOU_GAS_URL}?type=sales_targets`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+}
+
+// ---- Helper: get kadou month from header selector ----
+function getKadouMonth() {
+    return getSelectedMonth();
+}
+
+function kadouGetStatus(value, standard) {
+    if (value >= standard) return 'success';
+    if (value >= standard * 0.8) return 'warning';
+    return 'danger';
+}
+
+function kadouGetStatusColor(value, standard) {
+    const colors = { success: '#86aaec', warning: '#ede07d', danger: '#ef947a' };
+    if (value >= standard) return colors.success;
+    if (value >= standard * 0.8) return colors.warning;
+    return colors.danger;
+}
+
+function kadouFormatDeviation(dev) {
+    if (dev > 0) return `<span style="color:var(--success);font-weight:600;">+${dev}</span>`;
+    if (dev < 0) return `<span style="color:var(--danger);font-weight:600;">${dev}</span>`;
+    return `<span style="color:var(--text-muted);">±0</span>`;
+}
+
+// ========== Phase 2: 概要サブタブ ==========
+async function loadAndRenderKadouOverview() {
+    const container = document.getElementById('kadouOverviewContent');
+    const month = getKadouMonth();
+    const cacheKey = 'monthly_' + month;
+
+    // Show cached data immediately
+    const cached = kadouCacheGet(cacheKey);
+    if (cached && !kadouMonthlyData) {
+        kadouMonthlyData = cached;
+    }
+
+    if (!kadouMonthlyData) {
+        container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-light);">データを読み込んでいます...</div>';
+        try {
+            kadouMonthlyData = await fetchKadouMonthly(month);
+            kadouCacheSet(cacheKey, kadouMonthlyData);
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">読み込みエラー: ${escapeHtml(e.message)}</div>`;
+            return;
+        }
+    }
+
+    // Also load pipeline data for sales summary
+    if (!kadouPipelineData) {
+        const plCached = kadouCacheGet('pipeline');
+        if (plCached) {
+            kadouPipelineData = plCached;
+        } else {
+            try {
+                kadouPipelineData = await fetchKadouPipeline();
+                kadouCacheSet('pipeline', kadouPipelineData);
+            } catch (e) {
+                console.warn('Pipeline load failed:', e);
+            }
+        }
+    }
+
+    renderKadouOverview();
+}
+
+function renderKadouOverview() {
+    const container = document.getElementById('kadouOverviewContent');
+    const data = kadouMonthlyData;
+    if (!data) return;
+
+    const { metadata, summary, members } = data;
+    const month = getKadouMonth();
+
+    // Progress calculations
+    const elapsedDays = parseInt(metadata.elapsedDays) || 0;
+    const totalDays = parseInt(metadata.totalDays) || 1;
+    kadouTodayProgress = parseFloat(metadata.standardProgress);
+    kadouYesterdayProgress = Math.max(0, parseFloat(((elapsedDays - 1) / totalDays * 100).toFixed(2)));
+    kadouTomorrowProgress = Math.min(100, parseFloat(((elapsedDays + 1) / totalDays * 100).toFixed(2)));
+
+    const standardProgress = kadouProgressMode === 'today' ? kadouTodayProgress :
+                             kadouProgressMode === 'yesterday' ? kadouYesterdayProgress : kadouTomorrowProgress;
+
+    const now = new Date();
+    const currentYM = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+    const isCurrentMonth = (metadata.targetMonth || month) === currentYM;
+
+    // Sales summary from pipeline data
+    let salesHtml = '';
+    if (kadouPipelineData) {
+        const { pipeline, revenue, salesTargets } = kadouPipelineData;
+        const revMap = {}; (revenue || []).forEach(r => { revMap[r.month] = Number(r.revenue || 0); });
+        const tgtMap = {}; (salesTargets || []).forEach(r => { tgtMap[r.target_month] = Number(r.total_sales_target || 0); });
+        const plMap = {}; (pipeline || []).forEach(r => { plMap[r.month] = r; });
+
+        const target = tgtMap[month] || 0;
+        const rev = revMap[month] || 0;
+        const pl = plMap[month] || {};
+        const weighted = Number(pl.weighted || 0);
+        const prospect = rev + weighted;
+        const gap = target > 0 ? rev - target : 0;
+        const rate = target > 0 ? Math.round(rev / target * 1000) / 10 : 0;
+        const barWidth = Math.min(rate, 100);
+        const barColor = rate >= 100 ? 'var(--success)' : rate >= 80 ? 'var(--warning)' : 'var(--danger)';
+
+        salesHtml = `
+            <div class="card">
+                <div class="card-header"><h2>売上サマリー</h2></div>
+                <div class="card-body">
+                    <div class="kadou-sales-summary">
+                        <div class="kadou-sales-main">
+                            <div class="kadou-sales-label">確定売上</div>
+                            <div class="kadou-sales-amount">${formatYen(rev)}</div>
+                        </div>
+                        <div class="kadou-sales-bar-wrap">
+                            <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-light);margin-bottom:4px;">
+                                <span>達成率 ${rate}%</span>
+                                <span>目標 ${formatYen(target)}</span>
+                            </div>
+                            <div class="kadou-sales-bar">
+                                <div class="kadou-sales-bar-fill" style="width:${barWidth}%;background:${barColor};"></div>
+                            </div>
+                        </div>
+                        <div class="kadou-sales-cards">
+                            <div class="kadou-sales-card">
+                                <div class="kadou-sales-card-label">差分</div>
+                                <div class="kadou-sales-card-value" style="color:${gap >= 0 ? 'var(--success)' : 'var(--danger)'};">${formatYen(gap)}</div>
+                            </div>
+                            <div class="kadou-sales-card">
+                                <div class="kadou-sales-card-label">見込（PL込）</div>
+                                <div class="kadou-sales-card-value">${formatYen(prospect)}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top:12px;">
+                        <button class="btn btn-secondary btn-sm" onclick="toggleKadouSalesDetail()">
+                            <span id="kadouSalesDetailToggleIcon">▶</span> 売上詳細テーブル
+                        </button>
+                        <div id="kadouSalesDetailTable" style="display:none;margin-top:12px;">
+                            ${renderKadouSalesDetailTable()}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // KPI Progress
+    const callStatus = kadouGetStatus(summary.callProgressRate, standardProgress);
+    const appoStatus = kadouGetStatus(summary.appointmentProgressRate, standardProgress);
+    const diff = (summary.appointmentProgressRate - standardProgress).toFixed(1);
+
+    const kpiHtml = `
+        <div class="card">
+            <div class="card-header">
+                <h2>KPI進捗</h2>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="badge badge-info" style="font-size:0.8rem;">
+                        ${isCurrentMonth ? `経過 ${elapsedDays}日 / 全${totalDays}稼働日` : `全${totalDays}稼働日`}
+                    </span>
+                    <span class="badge badge-primary" id="kadouProgressBadge">標準進捗: ${standardProgress}%</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="kadou-progress-toggles">
+                    <button class="chart-toggle ${kadouProgressMode === 'yesterday' ? 'active' : ''}" onclick="setKadouProgressMode('yesterday')">前日 ${kadouYesterdayProgress}%</button>
+                    <button class="chart-toggle ${kadouProgressMode === 'today' ? 'active' : ''}" onclick="setKadouProgressMode('today')">本日 ${kadouTodayProgress}%</button>
+                    <button class="chart-toggle ${kadouProgressMode === 'tomorrow' ? 'active' : ''}" onclick="setKadouProgressMode('tomorrow')">明日 ${kadouTomorrowProgress}%</button>
+                </div>
+                <div class="kadou-kpi-grid">
+                    <div class="kadou-kpi-card highlight">
+                        <div class="kadou-kpi-label">標準進捗</div>
+                        <div class="kadou-kpi-value">${standardProgress}%</div>
+                        <div class="kadou-kpi-detail">経過日数ベース</div>
+                    </div>
+                    <div class="kadou-kpi-card">
+                        <div class="kadou-kpi-label">架電進捗</div>
+                        <div class="kadou-kpi-value ${callStatus}">${summary.callProgressRate}%</div>
+                        <div class="kadou-kpi-detail">${(summary.totalCalls || 0).toLocaleString()} / ${(summary.targetCalls || 0).toLocaleString()}件</div>
+                    </div>
+                    <div class="kadou-kpi-card">
+                        <div class="kadou-kpi-label">アポ進捗</div>
+                        <div class="kadou-kpi-value ${appoStatus}">${summary.appointmentProgressRate}%</div>
+                        <div class="kadou-kpi-detail">${summary.totalAppointments || 0} / ${summary.targetAppointments || 0}件</div>
+                    </div>
+                    <div class="kadou-kpi-card">
+                        <div class="kadou-kpi-label">進捗差分</div>
+                        <div class="kadou-kpi-value ${appoStatus}">${diff >= 0 ? '+' : ''}${diff}%</div>
+                        <div class="kadou-kpi-detail">アポ - 標準</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Member cards - apply filters
+    let filtered = members;
+    if (kadouSelectedProjects.length > 0) filtered = filtered.filter(m => kadouSelectedProjects.includes(m.project));
+    if (kadouSelectedMembers.length > 0) filtered = filtered.filter(m => kadouSelectedMembers.includes(m.name));
+    const sorted = [...filtered].sort((a, b) => b.appointmentProgress - a.appointmentProgress);
+
+    // Filter UI
+    const projects = [...new Set(members.map(m => m.project))];
+    const allNames = [...new Set(members.map(m => m.name))];
+    let availableProjects = new Set(projects);
+    let availableMembers = new Set(allNames);
+    if (kadouSelectedMembers.length > 0) {
+        availableProjects = new Set();
+        members.forEach(m => { if (kadouSelectedMembers.includes(m.name)) availableProjects.add(m.project); });
+    }
+    if (kadouSelectedProjects.length > 0) {
+        availableMembers = new Set();
+        members.forEach(m => { if (kadouSelectedProjects.includes(m.project)) availableMembers.add(m.name); });
+    }
+    const hasFilter = kadouSelectedProjects.length > 0 || kadouSelectedMembers.length > 0;
+
+    const filterHtml = `
+        <div class="card">
+            <div class="card-header"><h2>フィルター</h2></div>
+            <div class="card-body">
+                <div style="margin-bottom:8px;font-size:0.8rem;color:var(--text-light);">案件で絞り込み</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+                    ${[...availableProjects].map(p => `<button class="chart-toggle ${kadouSelectedProjects.includes(p) ? 'active' : ''}" onclick="toggleKadouFilter('project','${escapeHtml(p)}')">${escapeHtml(p)}</button>`).join('')}
+                </div>
+                <div style="margin-bottom:8px;font-size:0.8rem;color:var(--text-light);">担当者で絞り込み</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+                    ${[...availableMembers].map(n => `<button class="chart-toggle ${kadouSelectedMembers.includes(n) ? 'active' : ''}" onclick="toggleKadouFilter('member','${escapeHtml(n)}')">${escapeHtml(n)}</button>`).join('')}
+                </div>
+                ${hasFilter ? '<button class="btn btn-secondary btn-sm" onclick="clearKadouFilters()">クリア</button>' : ''}
+            </div>
+        </div>
+    `;
+
+    const memberCardsHtml = sorted.length > 0 ? `
+        <div class="card">
+            <div class="card-header"><h2>担当者別進捗</h2></div>
+            <div class="card-body">
+                <div class="kadou-member-grid">
+                    ${sorted.map(m => {
+                        const effectiveCallProgress = (m.targetCalls === 0 && m.actualCalls > 0) ? 100 : m.callProgress;
+                        const effectiveAppoProgress = (m.targetAppointments === 0 && m.actualAppointments > 0) ? 100 : m.appointmentProgress;
+                        const cs = kadouGetStatus(effectiveCallProgress, standardProgress);
+                        const as = kadouGetStatus(effectiveAppoProgress, standardProgress);
+                        const expectedCalls = Math.round(m.targetCalls * standardProgress / 100);
+                        const callDev = m.actualCalls - expectedCalls;
+                        const expectedAppo = Math.round(m.targetAppointments * standardProgress / 100);
+                        const appoDev = m.actualAppointments - expectedAppo;
+
+                        return `
+                            <div class="kadou-member-card">
+                                <div class="kadou-member-name">${escapeHtml(m.name)}（${escapeHtml(m.project)}）</div>
+                                <div class="kadou-progress-row">
+                                    <span class="kadou-progress-label">架電</span>
+                                    <div class="kadou-progress-bar-container">
+                                        <div class="kadou-progress-bar">
+                                            <div class="kadou-progress-fill ${cs}" style="width:${Math.min(effectiveCallProgress, 100)}%;"></div>
+                                            <div class="kadou-target-line" style="left:${standardProgress}%;"></div>
+                                        </div>
+                                    </div>
+                                    <span class="kadou-progress-value ${cs}">${effectiveCallProgress}%</span>
+                                </div>
+                                <div class="kadou-progress-row">
+                                    <span class="kadou-progress-label">アポ</span>
+                                    <div class="kadou-progress-bar-container">
+                                        <div class="kadou-progress-bar">
+                                            <div class="kadou-progress-fill ${as}" style="width:${Math.min(effectiveAppoProgress, 100)}%;"></div>
+                                            <div class="kadou-target-line" style="left:${standardProgress}%;"></div>
+                                        </div>
+                                    </div>
+                                    <span class="kadou-progress-value ${as}">${effectiveAppoProgress}%</span>
+                                </div>
+                                <div class="kadou-stats-row">
+                                    <div class="kadou-stat"><div class="kadou-stat-label">架電</div><div>${m.actualCalls}/${m.targetCalls}</div><div>${kadouFormatDeviation(callDev)}</div></div>
+                                    <div class="kadou-stat"><div class="kadou-stat-label">アポ</div><div>${m.actualAppointments}/${m.targetAppointments}</div><div>${kadouFormatDeviation(appoDev)}</div></div>
+                                    <div class="kadou-stat"><div class="kadou-stat-label">架toアポ</div><div>${m.callToAppointmentActual || 0}%</div></div>
+                                    <div class="kadou-stat"><div class="kadou-stat-label">売上</div><div>${formatYen(m.actualSales || 0)}</div></div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        </div>
+    ` : '';
+
+    // Charts
+    const chartsHtml = `
+        <div class="card">
+            <div class="card-header"><h2>個人別 架電 vs アポ進捗</h2></div>
+            <div class="card-body"><div class="chart-container"><canvas id="kadou-member-compare"></canvas></div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="card">
+                <div class="card-header"><h2>架電進捗ランキング</h2></div>
+                <div class="card-body"><div class="chart-container"><canvas id="kadou-call-rank"></canvas></div></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h2>アポ進捗ランキング</h2></div>
+                <div class="card-body"><div class="chart-container"><canvas id="kadou-appo-rank"></canvas></div></div>
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = salesHtml + kpiHtml + filterHtml + memberCardsHtml + chartsHtml;
+
+    // Render charts
+    renderKadouOverviewCharts(filtered, standardProgress);
+}
+
+function renderKadouOverviewCharts(members, standardProgress) {
+    if (!members || members.length === 0) return;
+
+    // Destroy old charts
+    ['kadou-member-compare', 'kadou-call-rank', 'kadou-appo-rank'].forEach(id => {
+        if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+    });
+
+    // Member data aggregation
+    const memberData = {};
+    members.forEach(m => {
+        if (!memberData[m.name]) memberData[m.name] = { totalCalls: 0, targetCalls: 0, totalAppo: 0, targetAppo: 0 };
+        memberData[m.name].totalCalls += m.actualCalls;
+        memberData[m.name].targetCalls += m.targetCalls;
+        memberData[m.name].totalAppo += m.actualAppointments;
+        memberData[m.name].targetAppo += m.targetAppointments;
+    });
+
+    const labels = Object.keys(memberData);
+    const callProg = labels.map(n => memberData[n].targetCalls === 0 ? (memberData[n].totalCalls > 0 ? 100 : 0) : Math.round(memberData[n].totalCalls / memberData[n].targetCalls * 1000) / 10);
+    const appoProg = labels.map(n => memberData[n].targetAppo === 0 ? (memberData[n].totalAppo > 0 ? 100 : 0) : Math.round(memberData[n].totalAppo / memberData[n].targetAppo * 1000) / 10);
+
+    const chartFont = { family: "'Noto Sans JP', sans-serif" };
+    const annotationOpts = {
+        annotations: {
+            line1: { type: 'line', yMin: standardProgress, yMax: standardProgress, borderColor: '#082558', borderWidth: 2, borderDash: [5, 5],
+                label: { display: true, content: `標準 ${standardProgress}%`, position: 'end', color: '#fff', backgroundColor: '#082558', font: { family: "'Poppins', sans-serif" } } }
+        }
+    };
+
+    const el1 = document.getElementById('kadou-member-compare');
+    if (el1) {
+        charts['kadou-member-compare'] = new Chart(el1, {
+            type: 'bar',
+            data: { labels, datasets: [
+                { label: '架電進捗', data: callProg, backgroundColor: '#1155cc', borderRadius: 4 },
+                { label: 'アポ進捗', data: appoProg, backgroundColor: '#00a2da', borderRadius: 4 }
+            ]},
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#787b7f', font: chartFont } }, annotation: annotationOpts },
+                scales: { y: { beginAtZero: true, grid: { color: '#e4e8ef' } }, x: { grid: { display: false } } }
+            }
+        });
+    }
+
+    // Rankings
+    const callRank = labels.map((n, i) => ({ name: n, v: callProg[i] })).sort((a, b) => b.v - a.v);
+    const appoRank = labels.map((n, i) => ({ name: n, v: appoProg[i] })).sort((a, b) => b.v - a.v);
+
+    const rankOpts = (data) => ({
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, grid: { color: '#e4e8ef' } }, y: { grid: { display: false } } }
+    });
+
+    const el2 = document.getElementById('kadou-call-rank');
+    if (el2) {
+        charts['kadou-call-rank'] = new Chart(el2, {
+            type: 'bar',
+            data: { labels: callRank.map(d => d.name), datasets: [{ data: callRank.map(d => d.v), backgroundColor: callRank.map(d => kadouGetStatusColor(d.v, standardProgress)), borderRadius: 4 }] },
+            options: rankOpts()
+        });
+    }
+
+    const el3 = document.getElementById('kadou-appo-rank');
+    if (el3) {
+        charts['kadou-appo-rank'] = new Chart(el3, {
+            type: 'bar',
+            data: { labels: appoRank.map(d => d.name), datasets: [{ data: appoRank.map(d => d.v), backgroundColor: appoRank.map(d => kadouGetStatusColor(d.v, standardProgress)), borderRadius: 4 }] },
+            options: rankOpts()
+        });
+    }
+}
+
+function setKadouProgressMode(mode) {
+    kadouProgressMode = mode;
+    renderKadouOverview();
+}
+
+function toggleKadouFilter(type, value) {
+    if (type === 'project') {
+        kadouSelectedProjects = kadouSelectedProjects.includes(value) ? kadouSelectedProjects.filter(p => p !== value) : [...kadouSelectedProjects, value];
+    } else {
+        kadouSelectedMembers = kadouSelectedMembers.includes(value) ? kadouSelectedMembers.filter(m => m !== value) : [...kadouSelectedMembers, value];
+    }
+    renderKadouOverview();
+}
+
+function clearKadouFilters() {
+    kadouSelectedProjects = [];
+    kadouSelectedMembers = [];
+    renderKadouOverview();
+}
+
+function toggleKadouSalesDetail() {
+    const el = document.getElementById('kadouSalesDetailTable');
+    const icon = document.getElementById('kadouSalesDetailToggleIcon');
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        icon.textContent = '▼';
+    } else {
+        el.style.display = 'none';
+        icon.textContent = '▶';
+    }
+}
+
+function renderKadouSalesDetailTable() {
+    if (!kadouPipelineData) return '<div style="color:var(--text-light);">パイプラインデータなし</div>';
+
+    const { deals, pipeline, revenue, salesTargets } = kadouPipelineData;
+    const quarters = [[3,4,5,6],[7,8,9],[10,11,12],[1,2]];
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    let currentQIdx = quarters.findIndex(q => q.includes(currentMonth));
+    if (currentQIdx === -1) currentQIdx = 0;
+    const year = now.getFullYear();
+    const qMonths = quarters[currentQIdx];
+    const monthKeys = qMonths.map(m => {
+        let y = year;
+        if (m <= 2 && currentMonth >= 3) y = year + 1;
+        return y + '-' + String(m).padStart(2, '0');
+    });
+    const monthLabels = qMonths.map(m => m + '月');
+
+    const tgtMap = {}; (salesTargets || []).forEach(r => { tgtMap[r.target_month] = Number(r.total_sales_target || 0); });
+    const revMap = {}; (revenue || []).forEach(r => { revMap[r.month] = Number(r.revenue || 0); });
+    const plMapData = {}; (pipeline || []).forEach(r => { plMapData[r.month] = r; });
+
+    // Separate won vs pipeline deals
+    const wonDeals = (deals || []).filter(d => d.phase === '受注');
+    const plDeals = (deals || []).filter(d => d.phase !== '受注' && d.phase !== '失注');
+
+    // Build deal-month amount map
+    function dealMonthMap(dealList) {
+        const map = {};
+        dealList.forEach(d => {
+            const key = d.deal_name + '|' + (d.owner || '');
+            if (!map[key]) map[key] = { name: d.deal_name, owner: d.owner || '', amounts: {} };
+            const dMonth = (d.expected_start_date || '').substring(0, 7);
+            if (monthKeys.includes(dMonth)) {
+                map[key].amounts[dMonth] = (map[key].amounts[dMonth] || 0) + Number(d.amount || 0);
+            }
+        });
+        return Object.values(map);
+    }
+
+    const wonRows = dealMonthMap(wonDeals);
+    const plRows = dealMonthMap(plDeals);
+
+    function renderDealRows(rows, sectionLabel, bgColor, dealList) {
+        if (rows.length === 0) return '';
+        let html = '';
+        rows.forEach((r, i) => {
+            const bg = i === 0 ? `<td rowspan="${rows.length}" style="font-weight:600;background:${bgColor};vertical-align:top;padding:8px;">${sectionLabel}</td>` : '';
+            // Find deal id for edit button
+            const deal = dealList.find(d => d.deal_name === r.name && (d.owner || '') === r.owner);
+            const editBtn = deal ? `<button class="btn btn-secondary btn-sm" onclick="openKadouDealForm('${deal.id}')" title="編集" style="padding:2px 6px;font-size:0.7rem;">&#9998;</button>` : '';
+            html += `<tr>${bg}<td>${escapeHtml(r.name)} ${editBtn}</td>${monthKeys.map(mk => `<td class="num">${r.amounts[mk] ? formatYen(r.amounts[mk]) : '¥0'}</td>`).join('')}<td class="num" style="font-weight:600;">${formatYen(monthKeys.reduce((s, mk) => s + (r.amounts[mk] || 0), 0))}</td></tr>`;
+        });
+        return html;
+    }
+
+    // Summary rows
+    const wonTotals = monthKeys.map(mk => wonRows.reduce((s, r) => s + (r.amounts[mk] || 0), 0));
+    const plTotals = monthKeys.map(mk => plRows.reduce((s, r) => s + (r.amounts[mk] || 0), 0));
+    const targets = monthKeys.map(mk => tgtMap[mk] || 0);
+
+    let html = `<div class="table-scroll"><table class="data-table" style="font-size:0.85rem;">
+        <thead><tr><th></th><th></th>${monthLabels.map(l => `<th class="num">${l}</th>`).join('')}<th class="num" style="border-left:2px solid var(--border-color);">合計</th></tr></thead>
+        <tbody>
+        <tr style="background:var(--gray-100);font-weight:600;"><td colspan="2">目標金額</td>${targets.map(t => `<td class="num">${formatYen(t)}</td>`).join('')}<td class="num" style="border-left:2px solid var(--border-color);">${formatYen(targets.reduce((a, b) => a + b, 0))}</td></tr>
+        <tr><td colspan="${monthKeys.length + 3}" style="height:4px;border:none;"></td></tr>
+        ${renderDealRows(wonRows, '確定', '#dcfce7', wonDeals)}
+        <tr><td colspan="${monthKeys.length + 3}" style="height:4px;border:none;"></td></tr>
+        ${renderDealRows(plRows, 'パイプ', '#fef3c7', plDeals)}
+        <tr><td colspan="${monthKeys.length + 3}" style="height:4px;border:none;"></td></tr>
+        <tr style="font-weight:600;background:var(--gray-100);"><td colspan="2">確定金額合計</td>${wonTotals.map(t => `<td class="num">${formatYen(t)}</td>`).join('')}<td class="num" style="border-left:2px solid var(--border-color);">${formatYen(wonTotals.reduce((a, b) => a + b, 0))}</td></tr>
+        <tr style="font-weight:600;background:var(--gray-100);"><td colspan="2">見込（パイプ込）</td>${monthKeys.map((mk, i) => `<td class="num">${formatYen(wonTotals[i] + plTotals[i])}</td>`).join('')}<td class="num" style="border-left:2px solid var(--border-color);">${formatYen(wonTotals.reduce((a, b) => a + b, 0) + plTotals.reduce((a, b) => a + b, 0))}</td></tr>
+        <tr><td colspan="${monthKeys.length + 3}" style="height:4px;border:none;"></td></tr>
+        <tr style="font-weight:600;color:${wonTotals.reduce((a, b, i) => a + b - targets[i], 0) < 0 ? 'var(--danger)' : 'var(--success)'};"><td colspan="2">目標対確定差分</td>${monthKeys.map((mk, i) => {
+            const d = wonTotals[i] - targets[i];
+            return `<td class="num" style="color:${d < 0 ? 'var(--danger)' : 'var(--success)'};">${formatYen(d)}</td>`;
+        }).join('')}<td class="num" style="border-left:2px solid var(--border-color);">${formatYen(wonTotals.reduce((a, b) => a + b, 0) - targets.reduce((a, b) => a + b, 0))}</td></tr>
+        <tr style="font-weight:600;"><td colspan="2">目標対見込差分</td>${monthKeys.map((mk, i) => {
+            const d = wonTotals[i] + plTotals[i] - targets[i];
+            return `<td class="num" style="color:${d < 0 ? 'var(--danger)' : 'var(--success)'};">${formatYen(d)}</td>`;
+        }).join('')}<td class="num" style="border-left:2px solid var(--border-color);">${formatYen(wonTotals.reduce((a, b) => a + b, 0) + plTotals.reduce((a, b) => a + b, 0) - targets.reduce((a, b) => a + b, 0))}</td></tr>
+        </tbody></table></div>
+        <div style="margin-top:12px;">
+            <button class="btn btn-primary btn-sm" onclick="openKadouDealForm()">+ 案件を追加</button>
+        </div>`;
+
+    return html;
+}
+
+// ========== Phase 3: 歩留まりサブタブ ==========
+async function loadAndRenderKadouYield() {
+    const container = document.getElementById('kadouYieldContent');
+    if (!kadouMonthlyData) {
+        try {
+            kadouMonthlyData = await fetchKadouMonthly(getKadouMonth());
+            kadouCacheSet('monthly_' + getKadouMonth(), kadouMonthlyData);
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">読み込みエラー: ${escapeHtml(e.message)}</div>`;
+            return;
+        }
+    }
+    renderKadouYield();
+}
+
+function renderKadouYield() {
+    const container = document.getElementById('kadouYieldContent');
+    const data = kadouMonthlyData;
+    if (!data || !data.members) return;
+
+    const members = data.members;
+    // Aggregate totals
+    let totalCalls = 0, totalPR = 0, totalAppo = 0;
+    members.forEach(m => {
+        totalCalls += m.actualCalls || 0;
+        totalPR += m.actualPR || 0;
+        totalAppo += m.actualAppointments || 0;
+    });
+
+    const callToPr = totalCalls > 0 ? totalPR / totalCalls * 100 : 0;
+    const prToAppo = totalPR > 0 ? totalAppo / totalPR * 100 : 0;
+    const callToAppo = totalCalls > 0 ? totalAppo / totalCalls * 100 : 0;
+
+    let html = '';
+
+    // Funnel
+    html += `
+        <div class="card">
+            <div class="card-header"><h2>歩留まりファネル</h2></div>
+            <div class="card-body">
+                <div class="funnel">
+                    <div class="funnel-step" style="background:var(--blue-50);">
+                        <div class="fs-value">${formatNum(totalCalls)}</div>
+                        <div class="fs-label">架電</div>
+                    </div>
+                    <div class="funnel-arrow">\u2192</div>
+                    <div class="funnel-step" style="background:var(--info-light);">
+                        <div class="fs-value">${formatNum(totalPR)}</div>
+                        <div class="fs-label">PR</div>
+                        <div class="funnel-rate">${formatPct(callToPr)}</div>
+                    </div>
+                    <div class="funnel-arrow">\u2192</div>
+                    <div class="funnel-step" style="background:var(--success-light);">
+                        <div class="fs-value">${formatNum(totalAppo)}</div>
+                        <div class="fs-label">アポ</div>
+                        <div class="funnel-rate">${formatPct(prToAppo)}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Member yield table
+    const uniqueMembers = [...new Set(members.map(m => m.name))];
+    html += `
+        <div class="card">
+            <div class="card-header"><h2>メンバー別歩留まり</h2></div>
+            <div class="card-body no-pad table-scroll">
+                <table class="data-table">
+                    <thead><tr>
+                        <th>メンバー</th>
+                        <th class="num">架電</th><th class="num">PR</th><th class="num">アポ</th>
+                        <th class="num">架toPR</th><th class="num">PRtoアポ</th><th class="num">架toアポ</th>
+                    </tr></thead>
+                    <tbody>
+    `;
+
+    uniqueMembers.forEach(name => {
+        const ms = members.filter(m => m.name === name);
+        const c = ms.reduce((s, m) => s + (m.actualCalls || 0), 0);
+        const p = ms.reduce((s, m) => s + (m.actualPR || 0), 0);
+        const a = ms.reduce((s, m) => s + (m.actualAppointments || 0), 0);
+        const ctp = c > 0 ? p / c * 100 : 0;
+        const pta = p > 0 ? a / p * 100 : 0;
+        const cta = c > 0 ? a / c * 100 : 0;
+
+        html += `<tr>
+            <td>${escapeHtml(name)}</td>
+            <td class="num">${formatNum(c)}</td>
+            <td class="num">${formatNum(p)}</td>
+            <td class="num">${formatNum(a)}</td>
+            <td class="num ${yieldClass(ctp, 15)}">${formatPct(ctp)}</td>
+            <td class="num ${yieldClass(pta, 30)}">${formatPct(pta)}</td>
+            <td class="num ${yieldClass(cta, 3)}">${formatPct(cta)}</td>
+        </tr>`;
+    });
+
+    html += `
+                    </tbody>
+                    <tfoot><tr style="font-weight:600;background:var(--gray-100);">
+                        <td>合計</td>
+                        <td class="num">${formatNum(totalCalls)}</td>
+                        <td class="num">${formatNum(totalPR)}</td>
+                        <td class="num">${formatNum(totalAppo)}</td>
+                        <td class="num">${formatPct(callToPr)}</td>
+                        <td class="num">${formatPct(prToAppo)}</td>
+                        <td class="num">${formatPct(callToAppo)}</td>
+                    </tr></tfoot>
+                </table>
+            </div>
+        </div>
+    `;
+
+    // Baselines legend
+    html += `<div class="alert alert-info" style="font-size:0.8rem;">
+        基準値: 架toPR \u226515%, PRtoアポ \u226530%, 架toアポ \u22653% &mdash;
+        <span class="yield-good">達成</span> / <span class="yield-warn">注意</span> / <span class="yield-bad">要改善</span>
+    </div>`;
+
+    // Diagnosis
+    html += '<div class="card"><div class="card-header"><h2>診断・改善示唆</h2></div><div class="card-body"><ul class="diagnosis-list">';
+    const diagnoses = [];
+
+    if (callToPr < 15 * 0.7) {
+        diagnoses.push({ icon: '\u26A0\uFE0F', text: `架電toPR率が${formatPct(callToPr)}と低水準です。トークスクリプトの見直しやロープレを推奨します。` });
+    } else if (callToPr < 15) {
+        diagnoses.push({ icon: '\u{1F4A1}', text: `架電toPR率${formatPct(callToPr)} - 基準の15%まであと少しです。受付突破率を意識しましょう。` });
+    }
+
+    if (prToAppo < 30 * 0.7) {
+        diagnoses.push({ icon: '\u26A0\uFE0F', text: `PRtoアポ率が${formatPct(prToAppo)}と低水準です。クロージングトークの改善が必要です。` });
+    } else if (prToAppo < 30) {
+        diagnoses.push({ icon: '\u{1F4A1}', text: `PRtoアポ率${formatPct(prToAppo)} - 基準の30%まであと少し。ヒアリング強化を。` });
+    }
+
+    if (callToAppo < 3 * 0.7) {
+        diagnoses.push({ icon: '\u26A0\uFE0F', text: `架電toアポ率${formatPct(callToAppo)}が低いです。全体的なアプローチ改善が急務です。` });
+    }
+
+    if (diagnoses.length === 0) {
+        diagnoses.push({ icon: '\u2705', text: '現在アラートはありません。全指標が基準値以上です。' });
+    }
+
+    diagnoses.forEach(d => {
+        html += `<li><span class="diagnosis-icon">${d.icon}</span><span>${d.text}</span></li>`;
+    });
+    html += '</ul></div></div>';
+
+    container.innerHTML = html;
+}
+
+// ========== Phase 4: 分析サブタブ ==========
+async function loadAndRenderKadouAnalysis() {
+    const container = document.getElementById('kadouAnalysisContent');
+    const month = getKadouMonth();
+    const startDate = month + '-01';
+    const endDate = getEndOfMonth(month);
+    const cacheKey = 'rawdata_' + startDate + '_' + endDate;
+
+    if (!kadouRawData) {
+        const cached = kadouCacheGet(cacheKey);
+        if (cached) {
+            kadouRawData = cached;
+        } else {
+            container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-light);">データを読み込んでいます...</div>';
+            try {
+                kadouRawData = await fetchKadouRawData(startDate, endDate);
+                kadouCacheSet(cacheKey, kadouRawData);
+            } catch (e) {
+                container.innerHTML = `<div class="alert alert-danger">読み込みエラー: ${escapeHtml(e.message)}</div>`;
+                return;
+            }
+        }
+    }
+    renderKadouAnalysis();
+}
+
+function getKadouFilteredAnalysisData() {
+    if (!kadouRawData || !kadouRawData.records) return { records: [], aggregated: null };
+    let filtered = kadouRawData.records;
+    if (kadouAnalysisSelectedProjects.length > 0) filtered = filtered.filter(r => kadouAnalysisSelectedProjects.includes(r.project));
+    if (kadouAnalysisSelectedMembers.length > 0) filtered = filtered.filter(r => kadouAnalysisSelectedMembers.includes(r.name));
+
+    let totalCalls = 0, totalPR = 0, totalAppo = 0, totalCallTime = 0;
+    const dailyMap = {};
+    filtered.forEach(r => {
+        totalCalls += r.calls; totalPR += r.pr; totalAppo += r.appo; totalCallTime += r.callTime;
+        if (r.date) {
+            if (!dailyMap[r.date]) dailyMap[r.date] = { calls: 0, pr: 0, appo: 0, callTime: 0 };
+            dailyMap[r.date].calls += r.calls; dailyMap[r.date].pr += r.pr;
+            dailyMap[r.date].appo += r.appo; dailyMap[r.date].callTime += r.callTime;
+        }
+    });
+
+    return {
+        records: filtered,
+        aggregated: {
+            totals: {
+                calls: totalCalls, pr: totalPR, appo: totalAppo, callTime: totalCallTime,
+                callToPR: totalCalls > 0 ? Math.round(totalPR / totalCalls * 10000) / 100 : 0,
+                prToAppo: totalPR > 0 ? Math.round(totalAppo / totalPR * 10000) / 100 : 0,
+                callToAppo: totalCalls > 0 ? Math.round(totalAppo / totalCalls * 10000) / 100 : 0,
+                callsPerHour: totalCallTime > 0 ? Math.round(totalCalls / totalCallTime * 10) / 10 : 0
+            },
+            daily: Object.keys(dailyMap).sort().map(date => ({
+                date, ...dailyMap[date],
+                callToPR: dailyMap[date].calls > 0 ? Math.round(dailyMap[date].pr / dailyMap[date].calls * 10000) / 100 : 0,
+                prToAppo: dailyMap[date].pr > 0 ? Math.round(dailyMap[date].appo / dailyMap[date].pr * 10000) / 100 : 0,
+                callToAppo: dailyMap[date].calls > 0 ? Math.round(dailyMap[date].appo / dailyMap[date].calls * 10000) / 100 : 0,
+                callsPerHour: dailyMap[date].callTime > 0 ? Math.round(dailyMap[date].calls / dailyMap[date].callTime * 10) / 10 : 0
+            }))
+        }
+    };
+}
+
+function renderKadouAnalysis() {
+    const container = document.getElementById('kadouAnalysisContent');
+    if (!kadouRawData) return;
+
+    const { aggregated } = getKadouFilteredAnalysisData();
+    if (!aggregated) return;
+
+    const totals = aggregated.totals;
+    const comparisons = kadouRawData.comparisons || { lastMonth: {}, allTime: {} };
+
+    // Filters
+    const projects = kadouRawData.filters ? kadouRawData.filters.projects || [] : [];
+    const members = kadouRawData.filters ? kadouRawData.filters.members || [] : [];
+    const hasFilter = kadouAnalysisSelectedProjects.length > 0 || kadouAnalysisSelectedMembers.length > 0;
+
+    function compClass(v) { return !v || v === 0 ? '' : v > 0 ? 'yield-good' : 'yield-bad'; }
+    function compFmt(v) { return !v || v === 0 ? '±0.0%' : (v > 0 ? '+' : '') + v.toFixed(1) + '%'; }
+
+    const chartTypes = [
+        { key: 'calls', label: '架電数' }, { key: 'pr', label: 'PR数' }, { key: 'appo', label: 'アポ数' },
+        { key: 'callToPR', label: '架toPR率' }, { key: 'prToAppo', label: 'PRtoアポ率' },
+        { key: 'callToAppo', label: '架toアポ率' }, { key: 'callsPerHour', label: '架電数/H' }
+    ];
+
+    let html = `
+        <div class="card">
+            <div class="card-header"><h2>フィルター</h2></div>
+            <div class="card-body">
+                <div style="margin-bottom:8px;font-size:0.8rem;color:var(--text-light);">案件で絞り込み</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+                    ${projects.map(p => `<button class="chart-toggle ${kadouAnalysisSelectedProjects.includes(p) ? 'active' : ''}" onclick="toggleKadouAnalysisFilter('project','${escapeHtml(p)}')">${escapeHtml(p)}</button>`).join('')}
+                </div>
+                <div style="margin-bottom:8px;font-size:0.8rem;color:var(--text-light);">担当者で絞り込み</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+                    ${members.map(n => `<button class="chart-toggle ${kadouAnalysisSelectedMembers.includes(n) ? 'active' : ''}" onclick="toggleKadouAnalysisFilter('member','${escapeHtml(n)}')">${escapeHtml(n)}</button>`).join('')}
+                </div>
+                ${hasFilter ? '<button class="btn btn-secondary btn-sm" onclick="clearKadouAnalysisFilters()">クリア</button>' : ''}
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h2>実数指標</h2></div>
+            <div class="card-body">
+                <div class="kadou-kpi-grid">
+                    <div class="kadou-kpi-card"><div class="kadou-kpi-label">架電数</div><div class="kadou-kpi-value">${totals.calls.toLocaleString()}</div></div>
+                    <div class="kadou-kpi-card"><div class="kadou-kpi-label">PR数</div><div class="kadou-kpi-value">${totals.pr.toLocaleString()}</div></div>
+                    <div class="kadou-kpi-card"><div class="kadou-kpi-label">アポ数</div><div class="kadou-kpi-value">${totals.appo.toLocaleString()}</div></div>
+                    <div class="kadou-kpi-card"><div class="kadou-kpi-label">架電数/H</div><div class="kadou-kpi-value">${totals.callsPerHour}</div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h2>率指標</h2></div>
+            <div class="card-body">
+                <div class="kadou-kpi-grid">
+                    <div class="kadou-kpi-card">
+                        <div class="kadou-kpi-label">架電toPR率</div>
+                        <div class="kadou-kpi-value">${totals.callToPR}%</div>
+                        <div class="kadou-kpi-detail">先月比: <span class="${compClass(comparisons.lastMonth.callToPR)}">${compFmt(comparisons.lastMonth.callToPR)}</span></div>
+                        <div class="kadou-kpi-detail">通算比: <span class="${compClass(comparisons.allTime.callToPR)}">${compFmt(comparisons.allTime.callToPR)}</span></div>
+                    </div>
+                    <div class="kadou-kpi-card">
+                        <div class="kadou-kpi-label">PRtoアポ率</div>
+                        <div class="kadou-kpi-value">${totals.prToAppo}%</div>
+                        <div class="kadou-kpi-detail">先月比: <span class="${compClass(comparisons.lastMonth.prToAppo)}">${compFmt(comparisons.lastMonth.prToAppo)}</span></div>
+                        <div class="kadou-kpi-detail">通算比: <span class="${compClass(comparisons.allTime.prToAppo)}">${compFmt(comparisons.allTime.prToAppo)}</span></div>
+                    </div>
+                    <div class="kadou-kpi-card">
+                        <div class="kadou-kpi-label">架電toアポ率</div>
+                        <div class="kadou-kpi-value">${totals.callToAppo}%</div>
+                        <div class="kadou-kpi-detail">先月比: <span class="${compClass(comparisons.lastMonth.callToAppo)}">${compFmt(comparisons.lastMonth.callToAppo)}</span></div>
+                        <div class="kadou-kpi-detail">通算比: <span class="${compClass(comparisons.allTime.callToAppo)}">${compFmt(comparisons.allTime.callToAppo)}</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>日次推移</h2>
+                <div class="chart-toggles">
+                    ${chartTypes.map(t => `<button class="chart-toggle ${kadouCurrentChartType === t.key ? 'active' : ''}" onclick="setKadouChartType('${t.key}')">${t.label}</button>`).join('')}
+                </div>
+            </div>
+            <div class="card-body">
+                <div style="margin-bottom:8px;">
+                    <label style="font-size:0.8rem;cursor:pointer;">
+                        <input type="checkbox" id="kadouCompareToggle" ${kadouCompareMonthEnabled ? 'checked' : ''} onchange="toggleKadouCompare()"> 前月と比較
+                    </label>
+                </div>
+                <div class="chart-container"><canvas id="kadou-analysis-chart"></canvas></div>
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = html;
+    renderKadouAnalysisChart();
+}
+
+function renderKadouAnalysisChart() {
+    const { aggregated } = getKadouFilteredAnalysisData();
+    if (!aggregated || !aggregated.daily || aggregated.daily.length === 0) return;
+
+    if (charts['kadou-analysis-chart']) { charts['kadou-analysis-chart'].destroy(); delete charts['kadou-analysis-chart']; }
+
+    const daily = aggregated.daily;
+    const config = {
+        calls: { label: '架電数', color: '#1155cc', field: 'calls' },
+        pr: { label: 'PR数', color: '#00a2da', field: 'pr' },
+        appo: { label: 'アポ数', color: '#22c55e', field: 'appo' },
+        callToPR: { label: '架電toPR率 (%)', color: '#f59e0b', field: 'callToPR' },
+        prToAppo: { label: 'PRtoアポ率 (%)', color: '#00a2da', field: 'prToAppo' },
+        callToAppo: { label: '架電toアポ率 (%)', color: '#e04f24', field: 'callToAppo' },
+        callsPerHour: { label: '架電数/H', color: '#ef4444', field: 'callsPerHour' }
+    };
+
+    const cfg = config[kadouCurrentChartType] || config.calls;
+    const labels = kadouCompareMonthEnabled ? daily.map(d => new Date(d.date).getDate() + '日') : daily.map(d => d.date);
+    const data = daily.map(d => d[cfg.field]);
+
+    const datasets = [{
+        label: kadouCompareMonthEnabled ? '当月 ' + cfg.label : cfg.label,
+        data, borderColor: cfg.color, backgroundColor: cfg.color + '20',
+        fill: !kadouCompareMonthEnabled, tension: 0.3, pointRadius: 4, pointBackgroundColor: cfg.color
+    }];
+
+    if (kadouCompareMonthEnabled && kadouRawData && kadouRawData.previousMonthDaily) {
+        const prevDaily = kadouRawData.previousMonthDaily.daily;
+        const validValues = prevDaily.filter(d => d[cfg.field] > 0).map(d => d[cfg.field]);
+        if (validValues.length > 0) {
+            const avg = Math.round(validValues.reduce((s, v) => s + v, 0) / validValues.length * 100) / 100;
+            datasets.push({
+                label: '前月平均 ' + cfg.label + ' (' + avg + ')',
+                data: Array(data.length).fill(avg),
+                borderColor: '#e04f24', backgroundColor: 'transparent',
+                fill: false, tension: 0, pointRadius: 0, borderWidth: 2, borderDash: [8, 4]
+            });
+        }
+    }
+
+    const canvas = document.getElementById('kadou-analysis-chart');
+    if (!canvas) return;
+
+    charts['kadou-analysis-chart'] = new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#787b7f', font: { family: "'Noto Sans JP', sans-serif" } } } },
+            scales: {
+                y: { beginAtZero: true, grid: { color: '#e4e8ef' } },
+                x: { grid: { display: false } }
+            }
+        }
+    });
+}
+
+function toggleKadouAnalysisFilter(type, value) {
+    if (type === 'project') {
+        kadouAnalysisSelectedProjects = kadouAnalysisSelectedProjects.includes(value)
+            ? kadouAnalysisSelectedProjects.filter(p => p !== value) : [...kadouAnalysisSelectedProjects, value];
+    } else {
+        kadouAnalysisSelectedMembers = kadouAnalysisSelectedMembers.includes(value)
+            ? kadouAnalysisSelectedMembers.filter(m => m !== value) : [...kadouAnalysisSelectedMembers, value];
+    }
+    renderKadouAnalysis();
+}
+
+function clearKadouAnalysisFilters() {
+    kadouAnalysisSelectedProjects = [];
+    kadouAnalysisSelectedMembers = [];
+    renderKadouAnalysis();
+}
+
+function setKadouChartType(type) {
+    kadouCurrentChartType = type;
+    renderKadouAnalysis();
+}
+
+function toggleKadouCompare() {
+    kadouCompareMonthEnabled = document.getElementById('kadouCompareToggle').checked;
+    // Hide absolute charts in compare mode
+    const absoluteCharts = ['calls', 'pr', 'appo'];
+    if (kadouCompareMonthEnabled && absoluteCharts.includes(kadouCurrentChartType)) {
+        kadouCurrentChartType = 'callToPR';
+    }
+    renderKadouAnalysis();
+}
+
+// ========== Phase 5: 設定サブタブ ==========
+async function loadAndRenderKadouSettings() {
+    const container = document.getElementById('kadouSettingsContent');
+    if (!kadouSettingsData) {
+        container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-light);">データを読み込んでいます...</div>';
+        try {
+            const result = await fetchKadouSalesTargets();
+            kadouSettingsData = result.targets || {};
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">読み込みエラー: ${escapeHtml(e.message)}</div>`;
+            return;
+        }
+    }
+    renderKadouSettings();
+}
+
+function renderKadouSettings() {
+    const container = document.getElementById('kadouSettingsContent');
+    const targets = kadouSettingsData || {};
+
+    // Generate Q months
+    const quarters = [[3,4,5,6],[7,8,9],[10,11,12],[1,2]];
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const year = now.getFullYear();
+    let currentQIdx = quarters.findIndex(q => q.includes(currentMonth));
+    if (currentQIdx === -1) currentQIdx = 0;
+
+    const months = [];
+    const q = quarters[currentQIdx];
+    q.forEach(m => {
+        let y = year;
+        if (m <= 2 && currentMonth >= 3) y = year + 1;
+        const key = y + '-' + String(m).padStart(2, '0');
+        months.push({ key, label: m + '月' });
+    });
+
+    container.innerHTML = `
+        <div class="card">
+            <div class="card-header"><h2>月別売上目標設定</h2></div>
+            <div class="card-body">
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>月</th><th>売上目標</th></tr></thead>
+                        <tbody id="kadouSettingsTableBody">
+                            ${months.map(m => {
+                                const val = targets[m.key] || '';
+                                return `<tr data-month="${m.key}">
+                                    <td style="font-weight:500;">${m.key.split('-')[0]}年${m.label}</td>
+                                    <td>
+                                        <input type="text" inputmode="numeric" class="kadou-settings-input" data-field="salesTarget"
+                                               value="${val ? Number(val).toLocaleString() : ''}" placeholder="0">
+                                        <span style="font-size:0.8rem;color:var(--text-light);margin-left:4px;">円</span>
+                                    </td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top:16px;display:flex;align-items:center;gap:12px;">
+                    <button class="btn btn-primary" onclick="saveKadouSettings()">保存</button>
+                    <span id="kadouSettingsMessage" style="font-size:0.85rem;"></span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function saveKadouSettings() {
+    const rows = document.querySelectorAll('#kadouSettingsTableBody tr');
+    const data = {};
+    rows.forEach(row => {
+        const month = row.dataset.month;
+        const raw = row.querySelector('[data-field="salesTarget"]').value.replace(/,/g, '');
+        data[month] = Number(raw) || 0;
+    });
+
+    const msgEl = document.getElementById('kadouSettingsMessage');
+    try {
+        const params = new URLSearchParams({ type: 'sales_targets_save', data: JSON.stringify(data) });
+        const res = await fetch(`${KADOU_GAS_URL}?${params}`);
+        const result = await res.json();
+        if (result.error) throw new Error(result.error);
+        msgEl.textContent = '保存しました';
+        msgEl.style.color = 'var(--success)';
+        // Clear pipeline cache
+        kadouPipelineData = null;
+        localStorage.removeItem('kadou_pipeline');
+        kadouSettingsData = data;
+    } catch (e) {
+        msgEl.textContent = 'エラー: ' + e.message;
+        msgEl.style.color = 'var(--danger)';
+    }
+    setTimeout(() => { msgEl.textContent = ''; }, 3000);
+}
+
+// ========== 稼働報酬 案件CRUD ==========
+let kadouEditingDealId = null;
+
+function openKadouDealForm(dealId) {
+    const modal = document.getElementById('kadouDealModal');
+    const title = document.getElementById('kadouDealFormTitle');
+    kadouEditingDealId = dealId || null;
+
+    // Populate owner dropdown
+    const select = document.getElementById('kdDealOwner');
+    const existing = select.querySelectorAll('option:not(:first-child)');
+    existing.forEach(o => o.remove());
+    const owners = new Set();
+    if (kadouPipelineData && kadouPipelineData.deals) {
+        kadouPipelineData.deals.forEach(d => { if (d.owner) owners.add(d.owner); });
+    }
+    if (kadouMonthlyData && kadouMonthlyData.members) {
+        kadouMonthlyData.members.forEach(m => { if (m.name) owners.add(m.name); });
+    }
+    Array.from(owners).sort().forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        select.appendChild(opt);
+    });
+
+    const deleteBtn = document.getElementById('kdDealDeleteBtn');
+
+    if (dealId && kadouPipelineData && kadouPipelineData.deals) {
+        const deal = kadouPipelineData.deals.find(d => String(d.id) === String(dealId));
+        if (deal) {
+            title.textContent = '案件を編集';
+            document.getElementById('kdDealName').value = deal.deal_name || '';
+            document.getElementById('kdDealOwner').value = deal.owner || '';
+            document.getElementById('kdDealPhase').value = deal.phase || '提案前';
+            document.getElementById('kdDealAmount').value = deal.amount || '';
+            document.getElementById('kdDealProbability').value = deal.probability ? Math.round(Number(deal.probability) * 100) : '';
+            document.getElementById('kdDealStartDate').value = deal.expected_start_date || '';
+            document.getElementById('kdDealNextAction').value = deal.next_action || '';
+            document.getElementById('kdDealDeadline').value = deal.action_deadline || '';
+            document.getElementById('kdDealMemo').value = deal.memo || '';
+            deleteBtn.style.display = '';
+        }
+    } else {
+        title.textContent = '新規案件を追加';
+        document.getElementById('kadouDealForm').reset();
+        document.getElementById('kdDealPhase').value = '提案前';
+        deleteBtn.style.display = 'none';
+    }
+
+    toggleKdDealFields();
+    modal.classList.remove('hidden');
+}
+
+function closeKadouDealForm() {
+    document.getElementById('kadouDealModal').classList.add('hidden');
+    kadouEditingDealId = null;
+}
+
+function toggleKdDealFields() {
+    const phase = document.getElementById('kdDealPhase').value;
+    const isWon = (phase === '受注');
+    document.getElementById('kdDealProbField').style.display = isWon ? 'none' : '';
+    document.getElementById('kdDealActionFields').style.display = isWon ? 'none' : '';
+    // 失注の場合もアクションフィールド非表示
+    if (phase === '失注') {
+        document.getElementById('kdDealActionFields').style.display = 'none';
+    }
+}
+
+async function submitKadouDealForm() {
+    const phase = document.getElementById('kdDealPhase').value;
+    const isWon = (phase === '受注');
+    const prob = document.getElementById('kdDealProbability').value;
+    const data = {
+        deal_name: document.getElementById('kdDealName').value,
+        owner: document.getElementById('kdDealOwner').value,
+        phase: phase,
+        amount: Number(document.getElementById('kdDealAmount').value) || 0,
+        probability: isWon ? 1 : (prob ? Number(prob) / 100 : 0),
+        expected_start_date: document.getElementById('kdDealStartDate').value,
+        next_action: isWon ? '' : document.getElementById('kdDealNextAction').value,
+        action_deadline: isWon ? '' : document.getElementById('kdDealDeadline').value,
+        memo: document.getElementById('kdDealMemo').value,
+    };
+
+    if (!data.deal_name || !data.owner) {
+        showToast('案件名と担当者は必須です', true);
+        return;
+    }
+
+    if (kadouEditingDealId) {
+        data.id = kadouEditingDealId;
+    }
+
+    const btn = document.getElementById('kdDealSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = '保存中...';
+
+    try {
+        // GAS Web App: GETで送信（元のsales_dashboardと同じ方式）
+        const url = `${KADOU_GAS_URL}?type=deal_upsert&data=${encodeURIComponent(JSON.stringify(data))}`;
+        console.log('Deal upsert URL:', url);
+        const res = await fetch(url);
+        console.log('Deal upsert response status:', res.status, res.ok);
+        const text = await res.text();
+        console.log('Deal upsert response:', text.substring(0, 200));
+        let result;
+        try { result = JSON.parse(text); } catch { result = { success: true }; }
+        if (result.error) throw new Error(result.error);
+
+        closeKadouDealForm();
+        showToast('案件を保存しました');
+        // Clear caches and reload
+        kadouPipelineData = null;
+        kadouMonthlyData = null;
+        localStorage.removeItem('kadou_pipeline');
+        localStorage.removeItem('kadou_monthly_' + getKadouMonth());
+        await loadAndRenderKadouOverview();
+    } catch (e) {
+        console.error('Deal upsert error:', e);
+        showToast('保存エラー: ' + e.message, true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '保存';
+    }
+}
+
+async function deleteKadouDeal() {
+    if (!kadouEditingDealId) return;
+    const name = document.getElementById('kdDealName').value;
+    if (!confirm(`「${name}」を削除しますか？`)) return;
+
+    try {
+        const url = `${KADOU_GAS_URL}?type=deal_delete&id=${encodeURIComponent(String(kadouEditingDealId))}`;
+        console.log('Deal delete URL:', url);
+        const res = await fetch(url);
+        console.log('Deal delete response status:', res.status, res.ok);
+        const text = await res.text();
+        console.log('Deal delete response:', text.substring(0, 200));
+        let result;
+        try { result = JSON.parse(text); } catch { result = { success: true }; }
+        if (result.error) throw new Error(result.error);
+
+        closeKadouDealForm();
+        showToast('案件を削除しました');
+        kadouPipelineData = null;
+        kadouMonthlyData = null;
+        localStorage.removeItem('kadou_pipeline');
+        localStorage.removeItem('kadou_monthly_' + getKadouMonth());
+        await loadAndRenderKadouOverview();
+    } catch (e) {
+        console.error('Deal delete error:', e);
+        showToast('削除エラー: ' + e.message, true);
+    }
+}
+
+// Reload kadou data on month change
+const _origOnMonthChange = onMonthChange;
+onMonthChange = function() {
+    // Reset kadou caches
+    kadouMonthlyData = null;
+    kadouPipelineData = null;
+    kadouRawData = null;
+    _origOnMonthChange();
+    if (currentPage === 'team-kadou') {
+        renderKadouSubTab(currentSubTab.kadou);
+    }
+};
