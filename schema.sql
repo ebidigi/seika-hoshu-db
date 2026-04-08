@@ -156,7 +156,7 @@ INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中颯汰', '
 -- 轟Team
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('轟', '轟Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('堀切', '轟Team');
-INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田端', '轟Team');
+-- 田端: 削除済み
 -- 野口Team
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('野口', '野口Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('中村た', '野口Team');

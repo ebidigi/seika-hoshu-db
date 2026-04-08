@@ -5,7 +5,7 @@ const TURSO_CONFIG = {
 };
 
 // ==================== グローバル状態 ====================
-let currentTab = 'morning';
+let currentTab = 'management';
 let performanceData = [];
 let appointmentsData = [];
 let membersData = [];
@@ -43,6 +43,11 @@ let appoSortAsc = false; // false=降順
 
 // ==================== 初期化 ====================
 document.addEventListener('DOMContentLoaded', () => {
+    // datalabelsプラグインをデフォルトOFF（円グラフだけ個別にON）
+    if (window.ChartDataLabels) {
+        Chart.register(ChartDataLabels);
+        Chart.defaults.plugins.datalabels = { display: false };
+    }
     // 月フィルターを2026年3月に固定
     const now = new Date();
     const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
@@ -133,7 +138,6 @@ const MEMBER_NAME_NORMALIZE = {
     '轟玲音': '轟', '轟 玲音': '轟',
     '清水陸斗': '清水', '清水 陸斗': '清水',
     '堀切友世': '堀切', '堀切 友世': '堀切',
-    '田端音藍': '田端', '田端 音藍': '田端', 'タバタ': '田端'
 };
 
 function normalizeMemberName(name) {
@@ -450,9 +454,7 @@ function renderAll() {
 
     // 他のタブはフィルター適用
     renderAppointments();
-    renderYield(filteredPerf, filter);
-    renderAnalysis(filteredPerf, filter);
-    renderIndividualAnalysis(noFilter);
+    renderAnalysisNew(noFilter);
     renderProjects();
     renderSettings();
 }
@@ -905,174 +907,685 @@ function renderMorning(filter) {
 }
 
 // ==================== Tab: 経営 ====================
+// 経営タブ用チャートインスタンス管理
+const mgmtCharts = {};
+let mgmtPeriod = 'month'; // 'day' | 'week' | 'month' | 'quarter'
+
+function switchMgmtPeriod(period) {
+    mgmtPeriod = period;
+    document.querySelectorAll('.mgmt-period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === period));
+    // Q別はデータ追加ロードが必要
+    if (period === 'quarter') {
+        loadQuarterDataAndRender();
+    } else {
+        const noFilter = { month: document.getElementById('filterMonth').value };
+        renderManagement(noFilter);
+    }
+}
+
+async function loadQuarterDataAndRender() {
+    const ym = document.getElementById('filterMonth').value;
+    const [y, m] = ym.split('-').map(Number);
+    const qStart = m <= 3 ? 1 : m <= 6 ? 4 : m <= 9 ? 7 : 10;
+    const months = [0, 1, 2].map(i => y + '-' + String(qStart + i).padStart(2, '0'));
+    const startDate = months[0] + '-01';
+    const endM = qStart + 2;
+    const endDate = y + '-' + String(endM).padStart(2, '0') + '-' + new Date(y, endM, 0).getDate();
+    try {
+        const [perf, appo, exec] = await Promise.all([
+            queryTurso("SELECT * FROM performance_rawdata WHERE input_date >= ? AND input_date <= ?", [startDate, endDate]),
+            queryTurso("SELECT * FROM appointments WHERE acquisition_date >= ? AND acquisition_date <= ?", [startDate, endDate]),
+            queryTurso("SELECT * FROM appointments WHERE scheduled_date >= ? AND scheduled_date <= ?", [startDate, endDate])
+        ]);
+        normalizeDataMemberNames(perf); normalizeDataMemberNames(appo); normalizeDataMemberNames(exec);
+        window._mgmtQuarterData = { perf: deduplicatePerformance(perf), appo: deduplicateAppointments(appo), exec: deduplicateAppointments(exec), months };
+        renderManagement({ month: ym });
+    } catch (e) { console.error('Quarter load error', e); }
+}
+
+// 期間に応じたデータフィルタ
+function filterByMgmtPeriod(perfData, appoData, execAppoData, ym) {
+    if (mgmtPeriod === 'month') return { perf: perfData, appo: appoData, exec: execAppoData };
+
+    if (mgmtPeriod === 'quarter' && window._mgmtQuarterData) {
+        return { perf: window._mgmtQuarterData.perf, appo: window._mgmtQuarterData.appo, exec: window._mgmtQuarterData.exec };
+    }
+
+    const today = new Date();
+    let startDate, endDate;
+    if (mgmtPeriod === 'day') {
+        startDate = endDate = formatDate(today);
+    } else if (mgmtPeriod === 'week') {
+        const dow = today.getDay();
+        const mon = new Date(today);
+        mon.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+        const sun = new Date(mon);
+        sun.setDate(mon.getDate() + 6);
+        startDate = formatDate(mon);
+        endDate = formatDate(sun);
+    }
+    return {
+        perf: perfData.filter(d => d.input_date >= startDate && d.input_date <= endDate),
+        appo: appoData.filter(d => d.acquisition_date >= startDate && d.acquisition_date <= endDate),
+        exec: execAppoData.filter(d => d.scheduled_date >= startDate && d.scheduled_date <= endDate)
+    };
+}
+function destroyMgmtCharts() {
+    Object.keys(mgmtCharts).forEach(k => { if (mgmtCharts[k]) { mgmtCharts[k].destroy(); delete mgmtCharts[k]; } });
+}
+
+// ゲージチャート描画（半円doughnut + 標準進捗マーカー）
+function createGaugeChart(canvasId, value, max, standardPct, label, subLabel) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const pct = max > 0 ? Math.min(value / max, 1.2) : 0;
+    const color = (pct * 100) >= standardPct ? '#86aaec' : (pct * 100) >= standardPct * 0.8 ? '#ede07d' : '#ef947a';
+
+    // 標準進捗マーカー: グラフ円弧上にラインを描画
+    const needlePlugin = {
+        id: 'gaugeNeedle_' + canvasId,
+        afterDatasetDraw(chart) {
+            const { ctx: c, chartArea } = chart;
+            const cx = (chartArea.left + chartArea.right) / 2;
+            const cy = chartArea.bottom;
+            const outerR = Math.min(chartArea.right - chartArea.left, (chartArea.bottom - chartArea.top)) * 0.92;
+            const innerR = outerR * 0.62; // cutout比率に合わせる
+            const angle = Math.PI + (standardPct / 100) * Math.PI; // 0%=π(左), 100%=2π(右)
+            // 円弧上にライン
+            const x1 = cx + (innerR - 4) * Math.cos(angle);
+            const y1 = cy + (innerR - 4) * Math.sin(angle);
+            const x2 = cx + (outerR + 4) * Math.cos(angle);
+            const y2 = cy + (outerR + 4) * Math.sin(angle);
+            c.save();
+            c.beginPath();
+            c.moveTo(x1, y1);
+            c.lineTo(x2, y2);
+            c.strokeStyle = '#333';
+            c.lineWidth = 2.5;
+            c.stroke();
+            c.restore();
+            // 標準ラベル（円弧の帯の中央に配置）
+            const midR = (innerR + outerR) / 2;
+            const lx = cx + midR * Math.cos(angle);
+            const ly = cy + midR * Math.sin(angle);
+            // ラインに沿って回転させて描画
+            c.save();
+            c.translate(lx, ly);
+            const textAngle = angle + Math.PI / 2; // ラインに垂直
+            c.rotate(textAngle);
+            c.font = '700 8px "Noto Sans JP"';
+            c.fillStyle = '#fff';
+            c.textAlign = 'center';
+            c.textBaseline = 'middle';
+            // 背景ピル
+            const txt = `標準 ${standardPct}%`;
+            const tw = c.measureText(txt).width + 8;
+            c.fillStyle = 'rgba(51,51,51,0.75)';
+            c.beginPath();
+            c.roundRect(-tw / 2, -8, tw, 16, 4);
+            c.fill();
+            c.fillStyle = '#fff';
+            c.fillText(txt, 0, 0);
+            c.restore();
+        }
+    };
+
+    mgmtCharts[canvasId] = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            datasets: [{
+                data: [Math.min(pct, 1) * 100, Math.max(100 - pct * 100, 0)],
+                backgroundColor: [color, '#f0f0f0'],
+                borderWidth: 0,
+                circumference: 180,
+                rotation: 270,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '72%',
+            layout: { padding: { top: 0 } },
+            plugins: {
+                tooltip: { enabled: false },
+                legend: { display: false },
+            },
+            layout: { padding: { top: 0, bottom: 0 } },
+        },
+        plugins: [needlePlugin, {
+            id: 'gaugeCenter_' + canvasId,
+            afterDraw(chart) {
+                const { ctx: c, chartArea } = chart;
+                const cx = (chartArea.left + chartArea.right) / 2;
+                const cy = chartArea.bottom;
+                c.save();
+                c.textAlign = 'center';
+                c.fillStyle = '#1a1a1a';
+                c.font = '700 22px "Poppins", sans-serif';
+                c.fillText('¥' + value.toLocaleString(), cx, cy - 20);
+                c.font = '500 11px "Noto Sans JP"';
+                c.fillStyle = '#888';
+                c.fillText(subLabel, cx, cy - 2);
+                c.restore();
+            }
+        }]
+    });
+}
+
 function renderManagement(filter) {
+    destroyMgmtCharts();
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
     const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
     const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
-    const cancelRate = parseFloat(settingsMap.cancel_rate_default || '0.8');
+    const RESKED_CANCEL_RATE = 0.15;
 
     const excluded = getExcludedMembers(ym);
-    const allAppo = appointmentsData.filter(d => !excluded.includes(d.member_name));
-    const allExecAppo = executionAppoData.filter(d => !excluded.includes(d.member_name));
-    const allPerf = performanceData.filter(d => !excluded.includes(d.member_name));
+    const periodData = filterByMgmtPeriod(
+        performanceData.filter(d => !excluded.includes(d.member_name)),
+        appointmentsData.filter(d => !excluded.includes(d.member_name)),
+        executionAppoData.filter(d => !excluded.includes(d.member_name)),
+        ym
+    );
+    const allPerf = periodData.perf;
+    const allAppo = periodData.appo;
+    const allExecAppo = periodData.exec;
 
     const acquisitionAmount = allAppo.reduce((s, a) => s + (a.amount || 0), 0);
     const execConfirmed = allExecAppo.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
     const execUnconfirmed = allExecAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
-    const execCancelled = allExecAppo.filter(a => a.status === 'キャンセル').reduce((s, a) => s + (a.amount || 0), 0);
-    const execReschedule = allExecAppo.filter(a => a.status === 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
+    const execCancelledAmt = allExecAppo.filter(a => a.status === 'キャンセル').reduce((s, a) => s + (a.amount || 0), 0);
+    const execRescheduleAmt = allExecAppo.filter(a => a.status === 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
 
     const { elapsed, total: totalDays } = getBusinessDays(ym);
     const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
     const acqRate = monthlyTarget > 0 ? Math.round(acquisitionAmount / monthlyTarget * 1000) / 10 : 0;
     const execRate = executionTarget > 0 ? Math.round(execConfirmed / executionTarget * 1000) / 10 : 0;
 
-    // 実施見込み逆算
-    const neededAcquisition = cancelRate > 0 ? Math.round(executionTarget / cancelRate) : executionTarget;
-    const acqGap = neededAcquisition - acquisitionAmount;
-
-    // 実施見込内訳（キャンセル・リスケ除外）
+    // 実施見込内訳
     const allExecAppoActive = allExecAppo.filter(a => a.status === '実施' || a.status === '未確認');
-    const currentMonthExec = allExecAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym));
-    const prevMonthExec = allExecAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym));
-    const currentMonthExecAmt = currentMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-    const prevMonthExecAmt = prevMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const currentMonthExecAmt = allExecAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const prevMonthExecAmt = allExecAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
 
-    // セクション1: 売上目標進捗
-    let html = `
-    <div class="section-title">全体 売上目標進捗</div>
-    <div class="mgmt-progress-grid">
-        <div class="mgmt-progress-card">
-            <div class="mgmt-progress-label">取得金額</div>
-            <div class="mgmt-progress-amount">¥${acquisitionAmount.toLocaleString()} <span class="mgmt-progress-rate" style="color:${acqRate >= standardProgress ? '#86aaec' : '#ef947a'};">/ ${acqRate}%</span></div>
-            <div class="mgmt-progress-sub">目標 ¥${monthlyTarget.toLocaleString()}</div>
-        </div>
-        <div class="mgmt-progress-card">
-            <div class="mgmt-progress-label">実施確定</div>
-            <div class="mgmt-progress-amount" style="color:#90b8f8;">¥${execConfirmed.toLocaleString()} <span class="mgmt-progress-rate" style="color:${execRate >= standardProgress ? '#86aaec' : '#ef947a'};">/ ${execRate}%</span></div>
-            <div class="mgmt-progress-sub">目標 ¥${executionTarget.toLocaleString()}</div>
-        </div>
-        <div class="mgmt-progress-card">
-            <div class="mgmt-progress-label">実施見込（未確認）</div>
-            <div class="mgmt-progress-amount">¥${execUnconfirmed.toLocaleString()}</div>
-            <div class="mgmt-progress-sub">確定分は除外</div>
-        </div>
-    </div>`;
+    // 着地ヨミ
+    const execForecast = execConfirmed + Math.round(execUnconfirmed * (1 - RESKED_CANCEL_RATE));
+    const forecastDiff = execForecast - executionTarget;
+    const forecastColor = forecastDiff >= 0 ? '#86aaec' : '#ef947a';
 
-    // セクション2: 実施見込み逆算
-    html += `
-    <div class="section-title" style="margin-top:24px;">実施見込み逆算</div>
-    <div class="mgmt-reverse-calc">
-        <table class="data-table">
-            <thead><tr>
-                <th>実施目標</th><th>実施率想定</th><th>必要取得額</th><th>現在取得額</th><th>差分</th>
-                <th>当月取得→実施</th><th>前月越し</th>
-            </tr></thead>
-            <tbody><tr>
-                <td class="text-right">¥${executionTarget.toLocaleString()}</td>
-                <td class="text-right">${(cancelRate * 100).toFixed(0)}%</td>
-                <td class="text-right" style="font-weight:600;">¥${neededAcquisition.toLocaleString()}</td>
-                <td class="text-right">¥${acquisitionAmount.toLocaleString()}</td>
-                <td class="text-right" style="color:${acqGap > 0 ? 'var(--primary-red)' : '#86aaec'};font-weight:600;">${acqGap > 0 ? '-' : '+'}¥${Math.abs(acqGap).toLocaleString()}</td>
-                <td class="text-right">¥${currentMonthExecAmt.toLocaleString()}</td>
-                <td class="text-right">¥${prevMonthExecAmt.toLocaleString()}</td>
-            </tr></tbody>
-        </table>
-    </div>`;
+    // アポ実施タイミング内訳（全アポ対象: 取得月×実施月の組み合わせ）
+    const allAppoActive = allAppo.filter(a => a.status !== 'キャンセル');
+    // 前月以前取得→当月実施
+    const timingPrevToThis = allExecAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    // 当月取得→当月実施
+    const timingThisToThis = allExecAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    // 当月取得→来月以降実施（当月取得アポのうち、実施予定が来月以降 or 実施予定なし）
+    const timingThisToFuture = allAppoActive.filter(a => {
+        if (!a.acquisition_date || !a.acquisition_date.startsWith(ym)) return false;
+        return !a.scheduled_date || !a.scheduled_date.startsWith(ym);
+    }).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const timingTotal = timingPrevToThis + timingThisToThis + timingThisToFuture;
 
-    // セクション3: 案件キャップ進捗 + 基準値判定
-    html += `<div class="section-title" style="margin-top:24px;">案件キャップ進捗</div>`;
-    const ym2 = ym;
+    // 全体KPI
+    const totalCalls = sum(allPerf, 'call_count');
+    const totalPr = sum(allPerf, 'pr_count');
+    const totalAppoCount = sum(allPerf, 'appointment_count');
+    const mgCallToPr = totalCalls > 0 ? (totalPr / totalCalls * 100).toFixed(1) : '0';
+    const mgPrToAppo = totalPr > 0 ? (totalAppoCount / totalPr * 100).toFixed(1) : '0';
+    const mgCallToAppo = totalCalls > 0 ? (totalAppoCount / totalCalls * 100).toFixed(1) : '0';
+    const appoWithinMonth = allAppo.filter(a => a.scheduled_date && a.scheduled_date.startsWith(ym)).length;
+    const appoWithinMonthRate = allAppo.length > 0 ? (appoWithinMonth / allAppo.length * 100).toFixed(1) : '0';
+    const avgUnitPrice = allAppo.length > 0 ? Math.round(acquisitionAmount / allAppo.length) : 0;
+    const execTotal = allExecAppo.length;
+    const execCancelCount = allExecAppo.filter(a => a.status === 'キャンセル').length;
+    const cancelRateVal = execTotal > 0 ? (execCancelCount / execTotal * 100).toFixed(1) : '0';
+    const execConfirmedCount = allExecAppo.filter(a => a.status === '実施').length;
+    const execConfirmRateVal = execTotal > 0 ? (execConfirmedCount / execTotal * 100).toFixed(1) : '0';
+
+    // ========== 個人別データ準備（ランキング用） ==========
+    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
+    const teamNames = getActiveTeamNames(ym);
+    const memberData = [];
+    teamNames.forEach(teamName => {
+        const teamMembers = getTeamMembersForMonth(teamName, ym).filter(n => activeMembers.some(m => m.member_name === n));
+        teamMembers.forEach(memberName => {
+            const mTarget = getTarget('member', memberName, ym);
+            const mAcqTarget = mTarget ? (parseFloat(mTarget.appointment_amount_target) || 0) : 0;
+            const mPerf = allPerf.filter(d => d.member_name === memberName);
+            const mAppo = allAppo.filter(d => d.member_name === memberName);
+            const mAppoAmount = mAppo.reduce((s, a) => s + (a.amount || 0), 0);
+            const mCallCount = sum(mPerf, 'call_count');
+            const mPrCount = sum(mPerf, 'pr_count');
+            const mAppoCount = sum(mPerf, 'appointment_count');
+            memberData.push({ name: memberName, target: mAcqTarget, actual: mAppoAmount, calls: mCallCount, pr: mPrCount, appo: mAppoCount });
+        });
+    });
+
+    // ========== 案件別データ準備 ==========
     const capData = projectsData.filter(p => p.status === 'active').map(proj => {
         const projPerf = allPerf.filter(d => d.project_name === proj.project_name);
         const projAppo = allAppo.filter(d => d.project_name === proj.project_name);
         const callCount = sum(projPerf, 'call_count');
+        const prCount = sum(projPerf, 'pr_count');
         const appoCount = sum(projPerf, 'appointment_count');
-        const callToAppo = callCount > 0 ? appoCount / callCount * 100 : 0;
         const unitPrice = proj.unit_price || 0;
-        const profitScore = unitPrice * callToAppo / 100;
         const actualCount = projAppo.length;
         const actualAmount = projAppo.reduce((s, a) => s + (a.amount || 0), 0);
         const capCount = proj.monthly_cap_count || 0;
         const capAmount = capCount * unitPrice;
-        return { ...proj, callCount, appoCount, callToAppo, profitScore, actualCount, actualAmount, capCount, capAmount };
-    });
+        const consumeRate = capCount > 0 ? Math.round(actualCount / capCount * 100) : 0;
+        const remaining = capCount > 0 ? capCount - actualCount : null;
+        const callToPr = callCount > 0 ? (prCount / callCount * 100).toFixed(1) : '-';
+        const prToAppo = prCount > 0 ? (appoCount / prCount * 100).toFixed(1) : '-';
+        const callToAppo = callCount > 0 ? (appoCount / callCount * 100).toFixed(1) : '-';
+        return { name: proj.project_name, unitPrice, capCount, capAmount, actualCount, actualAmount, consumeRate, remaining, callToPr, prToAppo, callToAppo };
+    }).filter(c => c.capCount > 0 || c.actualCount > 0);
 
-    let totalCapAmount = 0, totalActualAmount = 0;
-    html += `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-        <th>案件名</th><th class="text-right">単価</th><th class="text-right">キャップ数</th><th class="text-right">キャップ金額</th>
-        <th class="text-right">取得数</th><th class="text-right">取得金額</th><th class="text-right">消化率</th>
-        <th class="text-right">架toア率</th><th class="text-right">収益性</th><th>判定</th>
+    // 案件テーブルHTML
+    let projTableHtml = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+        <th>案件名</th><th class="text-right">単価</th>
+        <th class="text-right" style="background:#eef3fb;color:#6b8cba;">キャップ</th><th class="text-right" style="background:#eef3fb;color:#6b8cba;">キャップ金額</th>
+        <th class="text-right">取得数</th><th class="text-right">取得金額</th><th class="text-right">消化率</th><th class="text-right">残り</th>
+        <th class="text-right">架→着電</th><th class="text-right">着電→アポ</th><th class="text-right">架→アポ</th>
     </tr></thead><tbody>`;
-
+    let ttCapCount = 0, ttActCount = 0, ttCapAmt = 0, ttActAmt = 0;
     capData.forEach(c => {
-        totalCapAmount += c.capAmount;
-        totalActualAmount += c.actualAmount;
-        const consumeRate = c.capCount > 0 ? Math.round(c.actualCount / c.capCount * 100) : 0;
-        const isGood = c.profitScore >= 7.5;
-        html += `<tr>
-            <td>${escapeHtml(c.project_name)}</td>
-            <td class="text-right">¥${c.unit_price.toLocaleString()}</td>
-            <td class="text-right">${c.capCount}</td>
-            <td class="text-right">¥${c.capAmount.toLocaleString()}</td>
-            <td class="text-right">${c.actualCount}</td>
+        ttCapCount += c.capCount; ttActCount += c.actualCount;
+        ttCapAmt += c.capAmount; ttActAmt += c.actualAmount;
+        const cColor = c.consumeRate >= 90 ? '#ef947a' : c.consumeRate >= 70 ? '#ede07d' : '#86aaec';
+        projTableHtml += `<tr>
+            <td style="font-weight:600;">${escapeHtml(c.name)}</td>
+            <td class="text-right">¥${c.unitPrice.toLocaleString()}</td>
+            <td class="text-right" style="background:#f4f7fc;color:#6b8cba;">${c.capCount > 0 ? c.capCount + '件' : '-'}</td>
+            <td class="text-right" style="background:#f4f7fc;color:#6b8cba;">${c.capAmount > 0 ? '¥' + c.capAmount.toLocaleString() : '-'}</td>
+            <td class="text-right">${c.actualCount}件</td>
             <td class="text-right">¥${c.actualAmount.toLocaleString()}</td>
-            <td class="text-right">${consumeRate}%</td>
-            <td class="text-right">${c.callToAppo.toFixed(1)}%</td>
-            <td class="text-right" style="font-weight:600;color:${isGood ? '#86aaec' : 'var(--primary-red)'};">${c.profitScore.toFixed(1)}</td>
-            <td>${isGood ? '<span style="color:#86aaec;">適正</span>' : '<span style="color:var(--primary-red);">要改善</span>'}</td>
+            <td class="text-right" style="font-weight:600;color:${cColor};">${c.capCount > 0 ? c.consumeRate + '%' : '-'}</td>
+            <td class="text-right">${c.remaining !== null ? c.remaining + '件' : '-'}</td>
+            <td class="text-right">${c.callToPr}%</td>
+            <td class="text-right">${c.prToAppo}%</td>
+            <td class="text-right">${c.callToAppo}%</td>
         </tr>`;
     });
-    const capSufficient = totalCapAmount >= monthlyTarget;
-    html += `</tbody><tfoot><tr style="font-weight:600;">
-        <td>合計</td><td></td><td></td>
-        <td class="text-right" style="color:${capSufficient ? '#86aaec' : 'var(--primary-red)'};">¥${totalCapAmount.toLocaleString()}</td>
-        <td></td><td class="text-right">¥${totalActualAmount.toLocaleString()}</td>
+    projTableHtml += `</tbody><tfoot><tr style="font-weight:600;">
+        <td>合計</td><td></td>
+        <td class="text-right" style="background:#f4f7fc;color:#6b8cba;">${ttCapCount}件</td><td class="text-right" style="background:#f4f7fc;color:#6b8cba;">¥${ttCapAmt.toLocaleString()}</td>
+        <td class="text-right">${ttActCount}件</td><td class="text-right">¥${ttActAmt.toLocaleString()}</td>
+        <td class="text-right">${ttCapCount > 0 ? Math.round(ttActCount / ttCapCount * 100) + '%' : '-'}</td>
+        <td class="text-right">${ttCapCount > 0 ? (ttCapCount - ttActCount) + '件' : '-'}</td>
         <td></td><td></td><td></td>
-        <td>${capSufficient ? '充足' : '<span style="color:var(--primary-red);">不足</span>'}</td>
     </tr></tfoot></table></div>`;
-    html += `<div style="font-size:0.7rem;color:var(--text-light);margin-top:4px;">収益性 = 単価 × 架電toアポ率（基準: 7.5以上）</div>`;
 
-    // セクション4: アサイン適正判断
-    html += `<div class="section-title" style="margin-top:24px;">アサイン適正判断</div>`;
-    const memberAssessment = [];
-    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
-    activeMembers.forEach(member => {
-        const mPerf = allPerf.filter(d => d.member_name === member.member_name);
-        const mCallCount = sum(mPerf, 'call_count');
-        const mPrCount = sum(mPerf, 'pr_count');
-        const mAppoCount = sum(mPerf, 'appointment_count');
-        const callToPr = mCallCount > 0 ? mPrCount / mCallCount * 100 : 0;
-        const prToAppo = mPrCount > 0 ? mAppoCount / mPrCount * 100 : 0;
-        const callToAppo = mCallCount > 0 ? mAppoCount / mCallCount * 100 : 0;
-        memberAssessment.push({ name: member.member_name, team: member.team_name, callCount: mCallCount, callToPr, prToAppo, callToAppo });
-    });
+    // 期間ラベル
+    const periodLabels = { day: '日別', week: '週別', month: '月別', quarter: 'Q別' };
 
-    html += `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-        <th>メンバー</th><th>チーム</th><th class="text-right">架電数</th>
-        <th class="text-right">架toPR率</th><th class="text-right">PRtoアポ率</th><th class="text-right">架toアポ率</th><th>状態</th>
-    </tr></thead><tbody>`;
-    memberAssessment.forEach(m => {
-        const status = m.callToAppo < 2 && m.callCount > 100 ? '要注意' : m.callCount < 50 ? '稼働少' : '正常';
-        const statusColor = status === '要注意' ? 'var(--primary-red)' : status === '稼働少' ? '#8a7a00' : '#86aaec';
-        html += `<tr>
-            <td>${escapeHtml(m.name)}</td><td>${escapeHtml(m.team)}</td>
-            <td class="text-right">${m.callCount.toLocaleString()}</td>
-            <td class="text-right">${m.callToPr.toFixed(1)}%</td>
-            <td class="text-right">${m.prToAppo.toFixed(1)}%</td>
-            <td class="text-right">${m.callToAppo.toFixed(1)}%</td>
-            <td style="color:${statusColor};font-weight:600;">${status}</td>
-        </tr>`;
-    });
-    html += `</tbody></table></div>`;
+    // ========== HTML構築 ==========
+    let html = `
+    <!-- 期間切替 -->
+    <div class="mgmt-period-bar">
+        <button class="mgmt-period-btn ${mgmtPeriod === 'day' ? 'active' : ''}" data-period="day" onclick="switchMgmtPeriod('day')">日別</button>
+        <button class="mgmt-period-btn ${mgmtPeriod === 'week' ? 'active' : ''}" data-period="week" onclick="switchMgmtPeriod('week')">週別</button>
+        <button class="mgmt-period-btn ${mgmtPeriod === 'month' ? 'active' : ''}" data-period="month" onclick="switchMgmtPeriod('month')">月別</button>
+        <button class="mgmt-period-btn ${mgmtPeriod === 'quarter' ? 'active' : ''}" data-period="quarter" onclick="switchMgmtPeriod('quarter')">Q別</button>
+        <span class="mgmt-period-label">${periodLabels[mgmtPeriod]}表示</span>
+    </div>
 
-    document.getElementById('mgmtSalesProgress').innerHTML = '';
+    <!-- トップ3カード: ゲージ×2 + ヨミ -->
+    <div class="mgmt-top-cards">
+        <div class="mgmt-gauge-card">
+            <div class="mgmt-gauge-title">取得金額</div>
+            <div class="mgmt-gauge-wrap"><canvas id="mgmtGaugeAcq"></canvas></div>
+            <div class="mgmt-gauge-footer">目標 ¥${monthlyTarget.toLocaleString()}</div>
+        </div>
+        <div class="mgmt-gauge-card">
+            <div class="mgmt-gauge-title">実施確定金額</div>
+            <div class="mgmt-gauge-wrap"><canvas id="mgmtGaugeExec"></canvas></div>
+            <div class="mgmt-gauge-footer">目標 ¥${executionTarget.toLocaleString()}</div>
+        </div>
+        <div class="mgmt-gauge-card mgmt-yomi-card">
+            <div class="mgmt-gauge-title">着地ヨミ<span style="font-size:0.7rem;color:var(--text-light);margin-left:6px;">85%換算</span></div>
+            <div class="mgmt-yomi-value" style="color:${forecastColor};">¥${execForecast.toLocaleString()}</div>
+            <div class="mgmt-yomi-sub">確定 ¥${execConfirmed.toLocaleString()} ＋ 未確認 ¥${execUnconfirmed.toLocaleString()} × 85%</div>
+            <div class="mgmt-yomi-diff" style="color:${forecastColor};">目標比 ${forecastDiff >= 0 ? '+' : ''}¥${forecastDiff.toLocaleString()}</div>
+        </div>
+    </div>
+
+    <!-- 円グラフ2つ -->
+    <div class="mgmt-pies-row">
+        <div class="mgmt-pie-wrap">
+            <div class="mgmt-pie-title">実施ステータス内訳</div>
+            <div style="position:relative;height:220px;"><canvas id="mgmtPieExec"></canvas></div>
+            <div class="mgmt-pie-detail" id="mgmtPieDetail"></div>
+            <div class="mgmt-pie-formula">確定 + 未確認 + リスケ + キャンセル</div>
+        </div>
+        <div class="mgmt-pie-wrap">
+            <div class="mgmt-pie-title">着地ヨミ内訳</div>
+            <div style="position:relative;height:220px;"><canvas id="mgmtPieYomi"></canvas></div>
+            <div class="mgmt-pie-detail" id="mgmtPieYomiDetail"></div>
+            <div class="mgmt-pie-formula">確定 + 未確認（リスケ・キャンセル除外）</div>
+        </div>
+        <div class="mgmt-pie-wrap">
+            <div class="mgmt-pie-title">アポ実施タイミング内訳</div>
+            <div style="position:relative;height:220px;"><canvas id="mgmtPieTiming"></canvas></div>
+            <div class="mgmt-pie-detail" id="mgmtPieTimingDetail"></div>
+            <div class="mgmt-pie-formula">前月越し実施 + 当月取得実施 + 当月取得来月以降</div>
+        </div>
+    </div>
+
+    <!-- 全体KPI -->
+    <div class="mgmt-kpi-numbers">
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">架電数</div><div class="mgmt-kpi-val">${totalCalls.toLocaleString()}</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">着電数</div><div class="mgmt-kpi-val">${totalPr.toLocaleString()}</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">アポ数</div><div class="mgmt-kpi-val">${totalAppoCount.toLocaleString()}</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">架電toアポ率</div><div class="mgmt-kpi-val">${mgCallToAppo}%</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">着電toアポ率</div><div class="mgmt-kpi-val">${mgPrToAppo}%</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">架電to着電率</div><div class="mgmt-kpi-val">${mgCallToPr}%</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">平均単価</div><div class="mgmt-kpi-val">¥${avgUnitPrice.toLocaleString()}</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">月内実施率</div><div class="mgmt-kpi-val">${appoWithinMonthRate}%</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">キャンセル率</div><div class="mgmt-kpi-val">${cancelRateVal}%</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">実施確定率</div><div class="mgmt-kpi-val">${execConfirmRateVal}%</div></div>
+    </div>
+
+    <!-- 個人別 取得金額（縦棒グラフ） -->
+    <div class="section-title" style="margin-top:28px;">個人別 取得金額 目標 vs 実績</div>
+    <div class="mgmt-chart-container"><canvas id="mgmtBarAmount"></canvas></div>
+
+    <!-- 個人別 ランキング3列 -->
+    <div class="mgmt-hbar-row" style="margin-top:16px;">
+        <div>
+            <div class="section-title">架電数ランキング</div>
+            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarCalls"></canvas></div>
+        </div>
+        <div>
+            <div class="section-title">着電数ランキング</div>
+            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarPr"></canvas></div>
+        </div>
+        <div>
+            <div class="section-title">アポ数ランキング</div>
+            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarAppo"></canvas></div>
+        </div>
+    </div>
+
+    <!-- 歩留まりランキング -->
+    <div class="section-title" style="margin-top:28px;">歩留まりランキング</div>
+    <div class="mgmt-hbar-row">
+        <div>
+            <div class="section-title" style="font-size:0.8rem;">架電→アポ率</div>
+            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarCallToAppo"></canvas></div>
+        </div>
+        <div>
+            <div class="section-title" style="font-size:0.8rem;">架電→着電率</div>
+            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarCallToPr"></canvas></div>
+        </div>
+        <div>
+            <div class="section-title" style="font-size:0.8rem;">着電→アポ率</div>
+            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarPrToAppo"></canvas></div>
+        </div>
+    </div>
+
+    <!-- 案件別 詳細テーブル -->
+    <div class="section-title" style="margin-top:28px;">案件別 詳細</div>
+    ${projTableHtml}`;
+
+    document.getElementById('mgmtSalesProgress').innerHTML = html;
     document.getElementById('mgmtExecForecast').innerHTML = '';
     document.getElementById('mgmtCapProgress').innerHTML = '';
     document.getElementById('mgmtAssignmentAssess').innerHTML = '';
-    // 全HTMLをmgmtSalesProgressに入れる（セクション分けは内部で行っている）
-    document.getElementById('mgmtSalesProgress').innerHTML = html;
+
+    // ========== チャート描画 ==========
+    createGaugeChart('mgmtGaugeAcq', acquisitionAmount, monthlyTarget, standardProgress, '取得金額', `達成率 ${acqRate}%`);
+    createGaugeChart('mgmtGaugeExec', execConfirmed, executionTarget, standardProgress, '実施確定', `達成率 ${execRate}%`);
+
+    // 円グラフ中心テキスト描画プラグイン
+    function pieCenterPlugin(centerText) {
+        return {
+            id: 'pieCenter_' + Math.random().toString(36).slice(2),
+            afterDraw(chart) {
+                const { ctx: c, chartArea } = chart;
+                const cx = (chartArea.left + chartArea.right) / 2;
+                const cy = (chartArea.top + chartArea.bottom) / 2;
+                c.save();
+                c.textAlign = 'center';
+                c.textBaseline = 'middle';
+                c.font = '700 15px "Poppins", sans-serif';
+                c.fillStyle = '#1a1a1a';
+                c.fillText(centerText, cx, cy - 6);
+                c.font = '500 9px "Noto Sans JP"';
+                c.fillStyle = '#999';
+                c.fillText('合計', cx, cy + 10);
+                c.restore();
+            }
+        };
+    }
+
+    // 円グラフ: 実施ステータス内訳
+    const execPieTotal = execConfirmed + execUnconfirmed + execRescheduleAmt + execCancelledAmt;
+    const pieCtx = document.getElementById('mgmtPieExec');
+    if (pieCtx) {
+        mgmtCharts['mgmtPieExec'] = new Chart(pieCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['確定（実施）', '未確認', 'リスケ', 'キャンセル'],
+                datasets: [{ data: [execConfirmed, execUnconfirmed, execRescheduleAmt, execCancelledAmt], backgroundColor: ['#86aaec', '#b8d4f0', '#ede07d', '#ef947a'], borderWidth: 2, borderColor: '#fff' }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { font: { size: 10, family: '"Noto Sans JP"' }, padding: 8, usePointStyle: true } },
+                    tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ¥${ctx.parsed.toLocaleString()}` } },
+                    datalabels: { display: true, color: '#fff', font: { weight: '700', size: 12 }, formatter: (val, ctx) => { const total = ctx.dataset.data.reduce((a, b) => a + b, 0); return total > 0 && val > 0 ? (val / total * 100).toFixed(0) + '%' : ''; } }
+                },
+                onClick: (evt, elements) => {
+                    const detail = document.getElementById('mgmtPieDetail');
+                    if (elements.length > 0 && detail) {
+                        const idx = elements[0].index;
+                        const labels = ['確定（実施）', '未確認', 'リスケ', 'キャンセル'];
+                        const amounts = [execConfirmed, execUnconfirmed, execRescheduleAmt, execCancelledAmt];
+                        const notes = ['実施確定済の金額', '今後実施予定の未確認金額', '翌月に流れる可能性あり', '請求¥0'];
+                        detail.innerHTML = `<div class="mgmt-pie-detail-card"><strong>${labels[idx]}</strong>: ¥${amounts[idx].toLocaleString()}<br><span style="color:var(--text-light);font-size:0.75rem;">${notes[idx]}</span></div>`;
+                    }
+                }
+            },
+            plugins: [pieCenterPlugin('¥' + execPieTotal.toLocaleString())]
+        });
+    }
+
+    // 円グラフ: 着地ヨミ内訳（当月取得 vs 前月取得）
+    const yomiPieTotal = currentMonthExecAmt + prevMonthExecAmt;
+    const pieYomiCtx = document.getElementById('mgmtPieYomi');
+    if (pieYomiCtx) {
+        mgmtCharts['mgmtPieYomi'] = new Chart(pieYomiCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['当月取得 → 当月実施', '前月取得 → 当月実施'],
+                datasets: [{ data: [currentMonthExecAmt, prevMonthExecAmt], backgroundColor: ['#86aaec', '#c4b5fd'], borderWidth: 2, borderColor: '#fff' }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { font: { size: 10, family: '"Noto Sans JP"' }, padding: 8, usePointStyle: true } },
+                    tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ¥${ctx.parsed.toLocaleString()}` } },
+                    datalabels: { display: true, color: '#fff', font: { weight: '700', size: 13 }, formatter: (val, ctx) => { const total = ctx.dataset.data.reduce((a, b) => a + b, 0); return total > 0 && val > 0 ? (val / total * 100).toFixed(0) + '%' : ''; } }
+                },
+                onClick: (evt, elements) => {
+                    const detail = document.getElementById('mgmtPieYomiDetail');
+                    if (elements.length > 0 && detail) {
+                        const idx = elements[0].index;
+                        const labels = ['当月取得 → 当月実施', '前月取得 → 当月実施'];
+                        const amounts = [currentMonthExecAmt, prevMonthExecAmt];
+                        const total = currentMonthExecAmt + prevMonthExecAmt;
+                        const pctVal = total > 0 ? (amounts[idx] / total * 100).toFixed(1) : '0';
+                        detail.innerHTML = `<div class="mgmt-pie-detail-card"><strong>${labels[idx]}</strong>: ¥${amounts[idx].toLocaleString()}（${pctVal}%）</div>`;
+                    }
+                }
+            },
+            plugins: [pieCenterPlugin('¥' + yomiPieTotal.toLocaleString())]
+        });
+    }
+
+    // 円グラフ: アポ実施タイミング内訳
+    const pieTimingCtx = document.getElementById('mgmtPieTiming');
+    if (pieTimingCtx) {
+        mgmtCharts['mgmtPieTiming'] = new Chart(pieTimingCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['前月以前取得→当月実施', '当月取得→当月実施', '当月取得→来月以降実施'],
+                datasets: [{ data: [timingPrevToThis, timingThisToThis, timingThisToFuture], backgroundColor: ['#c4b5fd', '#86aaec', '#a8d8b9'], borderWidth: 2, borderColor: '#fff' }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { font: { size: 9, family: '"Noto Sans JP"' }, padding: 8, usePointStyle: true } },
+                    tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ¥${ctx.parsed.toLocaleString()}` } },
+                    datalabels: { display: true, color: '#fff', font: { weight: '700', size: 12 }, formatter: (val, ctx) => { const total = ctx.dataset.data.reduce((a, b) => a + b, 0); return total > 0 && val > 0 ? (val / total * 100).toFixed(0) + '%' : ''; } }
+                },
+                onClick: (evt, elements) => {
+                    const detail = document.getElementById('mgmtPieTimingDetail');
+                    if (elements.length > 0 && detail) {
+                        const idx = elements[0].index;
+                        const labels = ['前月以前取得→当月実施', '当月取得→当月実施', '当月取得→来月以降実施'];
+                        const amounts = [timingPrevToThis, timingThisToThis, timingThisToFuture];
+                        detail.innerHTML = `<div class="mgmt-pie-detail-card"><strong>${labels[idx]}</strong>: ¥${amounts[idx].toLocaleString()}</div>`;
+                    }
+                }
+            },
+            plugins: [pieCenterPlugin('¥' + timingTotal.toLocaleString())]
+        });
+    }
+
+    // 横棒グラフ共通関数（高さ自動調整）
+    function createHBar(canvasId, data, valueKey, formatFn, colorFn) {
+        const sorted = [...data].sort((a, b) => b[valueKey] - a[valueKey]);
+        const ctx = document.getElementById(canvasId);
+        if (!ctx) return;
+        // 親コンテナの高さをデータ数に応じて調整
+        const h = Math.max(200, sorted.length * 30 + 40);
+        ctx.parentElement.style.height = h + 'px';
+        mgmtCharts[canvasId] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: sorted.map(d => d.name),
+                datasets: [{
+                    label: '',
+                    data: sorted.map(d => d[valueKey]),
+                    backgroundColor: sorted.map(d => colorFn ? colorFn(d) : '#86aaec'),
+                    borderRadius: 4,
+                    barPercentage: 0.7,
+                    categoryPercentage: 0.85,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { beginAtZero: true, ticks: { callback: formatFn, font: { size: 10 } }, grid: { color: '#f5f5f5' } },
+                    y: { ticks: { font: { size: 11, family: '"Noto Sans JP"', weight: '600' } }, grid: { display: false } }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (ctx) => formatFn(ctx.parsed.x) } }
+                }
+            }
+        });
+    }
+
+    // 取得金額（縦棒グラフ: 目標 vs 実績）
+    // 達成率の計算
+    const memberAchievements = memberData.map(d => {
+        if (d.target <= 0) return { pct: '-', color: 'var(--text-light)' };
+        const r = Math.round(d.actual / d.target * 1000) / 10;
+        const color = r >= standardProgress ? '#86aaec' : '#ef947a';
+        return { pct: r + '%', color };
+    });
+
+    const barAmountCtx = document.getElementById('mgmtBarAmount');
+    if (barAmountCtx) {
+        // 実績バーの上に達成率を表示するプラグイン
+        const achievementLabelPlugin = {
+            id: 'achievementLabels',
+            afterDatasetsDraw(chart) {
+                const { ctx: c } = chart;
+                const meta = chart.getDatasetMeta(1); // 実績dataset
+                c.save();
+                c.textAlign = 'center';
+                c.textBaseline = 'bottom';
+                c.font = '700 10px "Poppins", sans-serif';
+                meta.data.forEach((bar, i) => {
+                    const a = memberAchievements[i];
+                    c.fillStyle = a.color;
+                    c.fillText(a.pct, bar.x, bar.y - 4);
+                });
+                c.restore();
+            }
+        };
+
+        mgmtCharts['mgmtBarAmount'] = new Chart(barAmountCtx, {
+            type: 'bar',
+            data: {
+                labels: memberData.map(d => d.name),
+                datasets: [
+                    { label: '目標', data: memberData.map(d => d.target), backgroundColor: '#e0e0e0', borderRadius: 4, barPercentage: 0.6, categoryPercentage: 0.7 },
+                    { label: '実績', data: memberData.map(d => d.actual), backgroundColor: memberData.map(d => {
+                        if (d.target <= 0) return '#86aaec';
+                        const r = d.actual / d.target * 100;
+                        return r >= standardProgress ? '#86aaec' : r >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+                    }), borderRadius: 4, barPercentage: 0.6, categoryPercentage: 0.7 }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                layout: { padding: { top: 16 } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { callback: v => '¥' + (v / 10000).toFixed(0) + '万', font: { size: 10 } }, grid: { color: '#f0f0f0' } },
+                    x: { ticks: { font: { size: 11, family: '"Noto Sans JP"' } }, grid: { display: false } }
+                },
+                plugins: {
+                    legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 16 } },
+                    tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ¥${ctx.parsed.y.toLocaleString()}` } }
+                }
+            },
+            plugins: [achievementLabelPlugin]
+        });
+    }
+
+    // 架電数・着電数・アポ数ランキング
+    createHBar('mgmtHBarCalls', memberData, 'calls', v => v.toLocaleString(), () => '#86aaec');
+    createHBar('mgmtHBarPr', memberData, 'pr', v => v.toLocaleString(), () => '#b8d4f0');
+    createHBar('mgmtHBarAppo', memberData, 'appo', v => v.toLocaleString(), () => '#90b8f8');
+
+    // 歩留まりランキング
+    const yieldData = memberData.map(d => {
+        const callToAppo = d.calls > 0 ? d.appo / d.calls * 100 : 0;
+        const callToPr = d.calls > 0 ? d.pr / d.calls * 100 : 0;
+        const prToAppo = d.pr > 0 ? d.appo / d.pr * 100 : 0;
+        return { name: d.name, callToAppo, callToPr, prToAppo };
+    });
+
+    function createYieldHBar(canvasId, data, key, color) {
+        const sorted = [...data].sort((a, b) => b[key] - a[key]);
+        const ctx = document.getElementById(canvasId);
+        if (!ctx) return;
+        const h = Math.max(200, sorted.length * 30 + 40);
+        ctx.parentElement.style.height = h + 'px';
+        mgmtCharts[canvasId] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: sorted.map(d => d.name),
+                datasets: [{ data: sorted.map(d => d[key]), backgroundColor: color, borderRadius: 4, barPercentage: 0.7, categoryPercentage: 0.85 }]
+            },
+            options: {
+                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: { beginAtZero: true, ticks: { callback: v => v.toFixed(1) + '%', font: { size: 10 } }, grid: { color: '#f5f5f5' } },
+                    y: { ticks: { font: { size: 11, family: '"Noto Sans JP"', weight: '600' } }, grid: { display: false } }
+                },
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ctx.parsed.x.toFixed(1) + '%' } } }
+            }
+        });
+    }
+    createYieldHBar('mgmtHBarCallToAppo', yieldData, 'callToAppo', '#86aaec');
+    createYieldHBar('mgmtHBarCallToPr', yieldData, 'callToPr', '#b8d4f0');
+    createYieldHBar('mgmtHBarPrToAppo', yieldData, 'prToAppo', '#90b8f8');
 }
 
 // ==================== Tab: 詳細分析サブナビ ====================
@@ -1083,6 +1596,324 @@ function switchAnalysisSub(sub) {
     });
     document.querySelectorAll('.analysis-sub-content').forEach(el => {
         el.classList.toggle('hidden', el.id !== `analysisSub-${sub}`);
+    });
+}
+
+// ==================== Tab: 詳細分析（BI版） ====================
+let analysisCompareData = null;
+const analysisCharts = {};
+function destroyAnalysisCharts() {
+    Object.keys(analysisCharts).forEach(k => { if (analysisCharts[k]) { analysisCharts[k].destroy(); delete analysisCharts[k]; } });
+}
+
+// 指標定義
+const ANL_METRICS = [
+    { key: 'calls', label: '架電数', fmt: v => v.toLocaleString(), unit: '' },
+    { key: 'pr', label: '着電数', fmt: v => v.toLocaleString(), unit: '' },
+    { key: 'appo', label: 'アポ数', fmt: v => v.toLocaleString(), unit: '' },
+    { key: 'amount', label: '取得金額', fmt: v => '¥' + v.toLocaleString(), unit: '¥' },
+    { key: 'execConfirmed', label: '実施確定金額', fmt: v => '¥' + v.toLocaleString(), unit: '¥' },
+    { key: 'hours', label: '架電時間', fmt: v => v.toFixed(1) + 'h', unit: 'h' },
+    { key: 'days', label: '稼働日数', fmt: v => v + '日', unit: '日' },
+    { key: 'dailyCalls', label: '日次架電', fmt: v => v.toLocaleString(), unit: '' },
+    { key: 'hourly', label: '1hあたり架電数', fmt: v => v.toFixed(1), unit: '/h' },
+    { key: 'callToPr', label: '架→着電率', fmt: v => v.toFixed(1) + '%', unit: '%', isRate: true },
+    { key: 'prToAppo', label: '着電→アポ率', fmt: v => v.toFixed(1) + '%', unit: '%', isRate: true },
+    { key: 'callToAppo', label: '架→アポ率', fmt: v => v.toFixed(1) + '%', unit: '%', isRate: true },
+];
+
+function calcMemberStats(data, memberName, proj) {
+    let d = data.filter(r => r.member_name === memberName);
+    if (proj && proj !== 'all') d = d.filter(r => r.project_name === proj);
+    const calls = sum(d, 'call_count');
+    const pr = sum(d, 'pr_count');
+    const appo = sum(d, 'appointment_count');
+    const amount = sum(d, 'appointment_amount');
+    const hours = sum(d, 'call_hours');
+    const days = new Set(d.map(r => r.input_date)).size;
+    // 実施確定金額（executionAppoDataから）
+    let execAppo = executionAppoData.filter(a => a.member_name === memberName && a.status === '実施');
+    if (proj && proj !== 'all') execAppo = execAppo.filter(a => a.project_name === proj);
+    const execConfirmed = execAppo.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    return {
+        calls, pr, appo, amount, execConfirmed, hours, days,
+        dailyCalls: days > 0 ? Math.round(calls / days) : 0,
+        hourly: hours > 0 ? calls / hours : 0,
+        callToPr: calls > 0 ? pr / calls * 100 : 0,
+        prToAppo: pr > 0 ? appo / pr * 100 : 0,
+        callToAppo: calls > 0 ? appo / calls * 100 : 0,
+    };
+}
+
+function renderAnalysisNew(filter) {
+    destroyAnalysisCharts();
+    const ym = filter.month;
+    const excluded = getExcludedMembers(ym);
+    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
+    const activeProjects = projectsData.filter(p => p.status === 'active');
+    const sortedMembers = [...activeMembers].sort((a, b) => a.member_name.localeCompare(b.member_name, 'ja'));
+    const memberOpts = sortedMembers.map(m => `<option value="${escapeHtml(m.member_name)}">${escapeHtml(m.member_name)}</option>`).join('');
+    const metricOpts = ANL_METRICS.map(m => `<option value="${m.key}">${m.label}</option>`).join('');
+
+    let html = `
+    <!-- コントロール -->
+    <div class="anl-controls">
+        <div class="anl-control-group">
+            <label>期間A</label>
+            <input type="date" id="anlStartA" value="${ym}-01">
+            <span>〜</span>
+            <input type="date" id="anlEndA" value="${getEndOfMonth(ym)}">
+        </div>
+        <div class="anl-control-group">
+            <label>比較期間B</label>
+            <input type="date" id="anlStartB" value="">
+            <span>〜</span>
+            <input type="date" id="anlEndB" value="">
+        </div>
+        <div class="anl-control-group">
+            <label>案件</label>
+            <select id="anlProjectFilter">
+                <option value="all">全案件</option>
+                ${activeProjects.map(p => `<option value="${escapeHtml(p.project_name)}">${escapeHtml(p.project_name)}</option>`).join('')}
+            </select>
+        </div>
+        <button class="anl-apply-btn" onclick="applyAnalysisFilter()">適用</button>
+    </div>
+
+    <!-- 上段: スコアカード -->
+    <div class="anl-scorecard-area">
+        <div class="anl-scorecard-header">
+            <select id="anlScoreMember" onchange="renderScorecard()">${memberOpts}</select>
+        </div>
+        <div class="anl-scorecard-grid" id="anlScorecardGrid"></div>
+    </div>
+
+    <!-- 中段: ヒートマップ -->
+    <div class="section-title" style="margin-top:24px;">全員 × 指標 ヒートマップ</div>
+    <div style="overflow-x:auto;" id="anlHeatmapWrap"></div>
+
+    <!-- 下段: 散布図 -->
+    <div class="section-title" style="margin-top:24px;">散布図
+        <div style="display:inline-flex;gap:8px;margin-left:12px;font-size:0.8rem;">
+            <label style="font-weight:500;">X軸</label><select id="anlScatterX" onchange="renderScatter()">${metricOpts}</select>
+            <label style="font-weight:500;">Y軸</label><select id="anlScatterY" onchange="renderScatter()"><option value="callToAppo">架→アポ率</option>${metricOpts}</select>
+            <label style="font-weight:500;">サイズ</label><select id="anlScatterSize" onchange="renderScatter()"><option value="amount">取得金額</option>${metricOpts}</select>
+        </div>
+    </div>
+    <div class="mgmt-chart-container" style="height:380px;"><canvas id="anlScatterChart"></canvas></div>`;
+
+    document.getElementById('analysisNewContent').innerHTML = html;
+    applyAnalysisFilter();
+}
+
+async function applyAnalysisFilter() {
+    const startA = document.getElementById('anlStartA')?.value;
+    const endA = document.getElementById('anlEndA')?.value;
+    const startB = document.getElementById('anlStartB')?.value;
+    const endB = document.getElementById('anlEndB')?.value;
+    if (!startA || !endA) return;
+
+    const dataA = await fetchPerfRange(startA, endA);
+    let dataB = null;
+    if (startB && endB) dataB = await fetchPerfRange(startB, endB);
+    analysisCompareData = { dataA, dataB, startA, endA, startB, endB };
+
+    renderScorecard();
+    renderHeatmap();
+    renderScatter();
+}
+
+async function fetchPerfRange(start, end) {
+    const local = performanceData.filter(d => d.input_date >= start && d.input_date <= end);
+    if (local.length > 0) return local;
+    const data = await queryTurso("SELECT * FROM performance_rawdata WHERE input_date >= ? AND input_date <= ? ORDER BY input_date", [start, end]);
+    normalizeDataMemberNames(data);
+    return deduplicatePerformance(data);
+}
+
+// スコアカード
+function renderScorecard() {
+    if (!analysisCompareData) return;
+    const { dataA, dataB } = analysisCompareData;
+    const member = document.getElementById('anlScoreMember')?.value;
+    const proj = document.getElementById('anlProjectFilter')?.value;
+    if (!member) return;
+
+    const a = calcMemberStats(dataA, member, proj);
+    const b = dataB ? calcMemberStats(dataB, member, proj) : null;
+
+    let html = '';
+    ANL_METRICS.forEach(m => {
+        const valA = a[m.key];
+        const valB = b ? b[m.key] : null;
+        let diffHtml = '';
+        if (b) {
+            const diff = valA - valB;
+            if (Math.abs(diff) > 0.01) {
+                const color = diff > 0 ? '#86aaec' : '#ef947a';
+                const sign = diff > 0 ? '↑' : '↓';
+                const fmt = m.isRate ? Math.abs(diff).toFixed(1) + 'pt' : Math.abs(Math.round(diff)).toLocaleString();
+                diffHtml = `<div class="anl-sc-diff" style="color:${color};">${sign} ${fmt}</div>`;
+            } else {
+                diffHtml = `<div class="anl-sc-diff" style="color:var(--text-light);">→</div>`;
+            }
+        }
+        html += `<div class="anl-sc-tile">
+            <div class="anl-sc-label">${m.label}</div>
+            <div class="anl-sc-value">${m.fmt(valA)}</div>
+            ${diffHtml}
+        </div>`;
+    });
+    document.getElementById('anlScorecardGrid').innerHTML = html;
+}
+
+// レーダーチャート
+function renderRadar() {
+    if (!analysisCompareData) return;
+    if (analysisCharts['anlRadar']) { analysisCharts['anlRadar'].destroy(); }
+    const { dataA } = analysisCompareData;
+    const m1 = document.getElementById('anlRadarMember1')?.value;
+    const m2 = document.getElementById('anlRadarMember2')?.value;
+    const proj = document.getElementById('anlProjectFilter')?.value;
+    const excluded = getExcludedMembers(document.getElementById('filterMonth').value);
+    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
+
+    const s1 = calcMemberStats(dataA, m1, proj);
+    let s2;
+    if (m2 === 'avg') {
+        const allStats = activeMembers.map(m => calcMemberStats(dataA, m.member_name, proj));
+        s2 = {};
+        ANL_METRICS.forEach(m => { s2[m.key] = allStats.reduce((s, st) => s + st[m.key], 0) / allStats.length; });
+    } else {
+        s2 = calcMemberStats(dataA, m2, proj);
+    }
+
+    // 正規化: 全員の中での相対位置 (0-100)
+    const allStats = activeMembers.map(m => calcMemberStats(dataA, m.member_name, proj));
+    function normalize(key, val) {
+        const vals = allStats.map(s => s[key]);
+        const max = Math.max(...vals, 1);
+        return max > 0 ? val / max * 100 : 0;
+    }
+
+    const radarKeys = ['calls', 'pr', 'appo', 'amount', 'dailyCalls', 'hourly', 'callToPr', 'prToAppo', 'callToAppo'];
+    const radarLabels = radarKeys.map(k => ANL_METRICS.find(m => m.key === k)?.label || k);
+
+    const ctx = document.getElementById('anlRadarChart');
+    if (!ctx) return;
+    analysisCharts['anlRadar'] = new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: radarLabels,
+            datasets: [
+                { label: m1, data: radarKeys.map(k => normalize(k, s1[k])), borderColor: '#86aaec', backgroundColor: 'rgba(134,170,236,0.2)', pointRadius: 3 },
+                { label: m2 === 'avg' ? '全員平均' : m2, data: radarKeys.map(k => normalize(k, s2[k])), borderColor: '#c4b5fd', backgroundColor: 'rgba(196,181,253,0.15)', pointRadius: 3, borderDash: [4, 3] }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { r: { beginAtZero: true, max: 100, ticks: { display: false }, pointLabels: { font: { size: 10, family: '"Noto Sans JP"' } } } },
+            plugins: { legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true } } }
+        }
+    });
+}
+
+// ヒートマップ
+function renderHeatmap() {
+    if (!analysisCompareData) return;
+    const { dataA } = analysisCompareData;
+    const proj = document.getElementById('anlProjectFilter')?.value;
+    const excluded = getExcludedMembers(document.getElementById('filterMonth').value);
+    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
+
+    const allStats = activeMembers.map(m => ({ name: m.member_name, ...calcMemberStats(dataA, m.member_name, proj) }));
+
+    // 各指標のmin/max
+    const ranges = {};
+    ANL_METRICS.forEach(m => {
+        const vals = allStats.map(s => s[m.key]);
+        ranges[m.key] = { min: Math.min(...vals), max: Math.max(...vals, 1) };
+    });
+
+    function heatColor(key, val) {
+        const { min, max } = ranges[key];
+        const range = max - min || 1;
+        const ratio = (val - min) / range; // 0~1
+        // 青系グラデーション: 薄い→濃い
+        const r = Math.round(240 - ratio * 106); // 240→134
+        const g = Math.round(244 - ratio * 74);  // 244→170
+        const b = Math.round(248 - ratio * 12);  // 248→236
+        return `rgb(${r},${g},${b})`;
+    }
+
+    let html = `<table class="data-table anl-heatmap"><thead><tr><th>メンバー</th>`;
+    ANL_METRICS.forEach(m => { html += `<th class="text-right">${m.label}</th>`; });
+    html += `</tr></thead><tbody>`;
+
+    allStats.forEach(s => {
+        html += `<tr><td style="font-weight:600;white-space:nowrap;">${escapeHtml(s.name)}</td>`;
+        ANL_METRICS.forEach(m => {
+            const v = s[m.key];
+            html += `<td class="text-right" style="background:${heatColor(m.key, v)};font-size:0.75rem;font-weight:600;">${m.fmt(v)}</td>`;
+        });
+        html += `</tr>`;
+    });
+    html += `</tbody></table>`;
+    document.getElementById('anlHeatmapWrap').innerHTML = html;
+}
+
+// 散布図
+function renderScatter() {
+    if (!analysisCompareData) return;
+    if (analysisCharts['anlScatter']) { analysisCharts['anlScatter'].destroy(); }
+    const { dataA } = analysisCompareData;
+    const proj = document.getElementById('anlProjectFilter')?.value;
+    const xKey = document.getElementById('anlScatterX')?.value || 'calls';
+    const yKey = document.getElementById('anlScatterY')?.value || 'callToAppo';
+    const sizeKey = document.getElementById('anlScatterSize')?.value || 'amount';
+    const excluded = getExcludedMembers(document.getElementById('filterMonth').value);
+    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
+
+    const xMeta = ANL_METRICS.find(m => m.key === xKey);
+    const yMeta = ANL_METRICS.find(m => m.key === yKey);
+    const sMeta = ANL_METRICS.find(m => m.key === sizeKey);
+
+    const allStats = activeMembers.map(m => ({ name: m.member_name, ...calcMemberStats(dataA, m.member_name, proj) }));
+    const maxSize = Math.max(...allStats.map(s => s[sizeKey]), 1);
+
+    const colors = ['#86aaec', '#c4b5fd', '#ef947a', '#a8d8b9', '#ede07d', '#f0b8d0', '#90b8f8', '#b8d4f0', '#d4a8e0', '#f0c8a8', '#a8c8f0', '#c8e0a8', '#e0b8c8', '#b8e0d4', '#e0d4a8'];
+
+    const ctx = document.getElementById('anlScatterChart');
+    if (!ctx) return;
+    analysisCharts['anlScatter'] = new Chart(ctx, {
+        type: 'bubble',
+        data: {
+            datasets: allStats.map((s, i) => ({
+                label: s.name,
+                data: [{ x: s[xKey], y: s[yKey], r: Math.max(4, s[sizeKey] / maxSize * 30) }],
+                backgroundColor: colors[i % colors.length] + 'aa',
+                borderColor: colors[i % colors.length],
+                borderWidth: 1.5,
+            }))
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: {
+                x: { title: { display: true, text: xMeta?.label, font: { size: 11 } }, beginAtZero: true, ticks: { font: { size: 10 } }, grid: { color: '#f0f0f0' } },
+                y: { title: { display: true, text: yMeta?.label, font: { size: 11 } }, beginAtZero: true, ticks: { font: { size: 10 } }, grid: { color: '#f0f0f0' } }
+            },
+            plugins: {
+                legend: { position: 'right', labels: { font: { size: 10 }, usePointStyle: true, padding: 8 } },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const d = ctx.raw;
+                            return `${ctx.dataset.label}: ${xMeta?.label}=${xMeta?.fmt(d.x)}, ${yMeta?.label}=${yMeta?.fmt(d.y)}`;
+                        }
+                    }
+                }
+            }
+        }
     });
 }
 
@@ -3313,7 +4144,7 @@ function switchTab(tab) {
     // 朝礼・経営タブではフィルターを非表示
     const filters = document.getElementById('globalFilters');
     if (filters) {
-        filters.style.display = (tab === 'morning' || tab === 'management') ? 'none' : 'flex';
+        filters.style.display = (tab === 'morning' || tab === 'management' || tab === 'analysis') ? 'none' : 'flex';
     }
 
     // タブ切替時にチーム・メンバーフィルターをリセット（タブ間の影響を防止）
@@ -3345,6 +4176,14 @@ function exitExternalMode() {
     document.getElementById('globalFilters').style.display = 'flex';
 
     window.history.replaceState({}, '', window.location.pathname);
+}
+
+// ==================== サイドバー折りたたみ ====================
+function toggleSidebar() {
+    const container = document.querySelector('.app-container');
+    container.classList.toggle('sidebar-collapsed');
+    // チャートのリサイズを待つ
+    setTimeout(() => { window.dispatchEvent(new Event('resize')); }, 300);
 }
 
 // ==================== ユーティリティ ====================
@@ -3394,7 +4233,9 @@ function getTarget(type, name, ym) {
 
 function getBusinessDays(ym) {
     const [y, m] = ym.split('-').map(Number);
-    const today = new Date();
+    // 標準進捗は昨日時点で計算
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
     const lastDay = new Date(y, m, 0).getDate();
 
     let total = 0;
@@ -3409,7 +4250,7 @@ function getBusinessDays(ym) {
         if (dow === 0 || dow === 6 || holidaysSet.has(dateStr)) continue;
 
         total++;
-        if (date <= today) elapsed++;
+        if (date <= yesterday) elapsed++;
     }
 
     return { elapsed, total };
