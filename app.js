@@ -138,6 +138,23 @@ const MEMBER_NAME_NORMALIZE = {
     '轟玲音': '轟', '轟 玲音': '轟',
     '清水陸斗': '清水', '清水 陸斗': '清水',
     '堀切友世': '堀切', '堀切 友世': '堀切',
+    // 全社メンバー
+    '堺敏寿': '堺', '堺 敏寿': '堺', '@堺敏寿/Sakai Toshihisa': '堺',
+    '小甲陽平': '小甲', '小甲 陽平': '小甲', '@小甲陽平/Kokabu Yohei': '小甲',
+    '増谷大輔': '増谷', '増谷 大輔': '増谷', '@増谷大輔/masuya daisuke': '増谷',
+    '川上健斗': '川上', '川上 健斗': '川上', '@川上健斗/kento kawakami': '川上',
+    '川野透也': '川野', '川野 透也': '川野', '@川野 透也/Kawano Yukiya': '川野',
+    '浦上開至': '浦上', '浦上 開至': '浦上', '@浦上開至/Kaishin Urakami': '浦上',
+    '秋元崇利': '秋元', '秋元 崇利': '秋元', '@秋元崇利/akimoto takatoshi': '秋元',
+    '笹田怜央': '笹田', '笹田 怜央': '笹田', '@笹田 怜央/sasada reo': '笹田',
+    '原田幸輝': '原田', '@原田幸輝': '原田',
+    '田山喜也': '田山', '田山 喜也': '田山', '@田山 喜也/tayama yoshiya': '田山',
+    '小西真次': '小西', '@小西真次': '小西',
+    '岸田悠希': '岸田', '岸田 悠希': '岸田', '@Yuki Kishida / 岸田 悠希': '岸田',
+    '中村優来': '中村ゆ', '中村 優来': '中村ゆ', '@中村 優来/nakamura yuuri': '中村ゆ',
+    '中村凌': '中村り', '中村 凌': '中村り', '@中村凌/nakamura ryo': '中村り',
+    '生井響': '生井', '生井 響': '生井', '@生井 響': '生井',
+    '海老根涼太': '海老根', '海老根 涼太': '海老根', '@海老根涼太/ebine ryota': '海老根',
 };
 
 function normalizeMemberName(name) {
@@ -1628,9 +1645,12 @@ function calcMemberStats(data, memberName, proj) {
     const calls = sum(d, 'call_count');
     const pr = sum(d, 'pr_count');
     const appo = sum(d, 'appointment_count');
-    const amount = sum(d, 'appointment_amount');
     const hours = sum(d, 'call_hours');
     const days = new Set(d.map(r => r.input_date)).size;
+    // 取得金額（appointmentsテーブルから、performance_rawdataのamountは不正確な場合がある）
+    let memberAppo = appointmentsData.filter(a => a.member_name === memberName);
+    if (proj && proj !== 'all') memberAppo = memberAppo.filter(a => a.project_name === proj);
+    const amount = memberAppo.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
     // 実施確定金額（executionAppoDataから）
     let execAppo = executionAppoData.filter(a => a.member_name === memberName && a.status === '実施');
     if (proj && proj !== 'all') execAppo = execAppo.filter(a => a.project_name === proj);

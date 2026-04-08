@@ -1,20 +1,77 @@
 /**
- * Google Apps Script: Sheets → Turso 同期スクリプト（成果報酬チーム専用）
+ * Google Apps Script: Sheets → Turso 同期スクリプト
  *
- * 機能: 実績rawdataシートから成果報酬チームメンバーのデータを抽出してTursoに同期
- *
- * セットアップ手順:
- * 1. GASエディタでこのファイルの内容をコピー
- * 2. スクリプトプロパティに以下を設定:
- *    - SEIKA_TURSO_DATABASE_URL: libsql://seika-hoshu-db-ebidigi.aws-ap-northeast-1.turso.io
- *    - SEIKA_TURSO_AUTH_TOKEN: (Tursoダッシュボードから取得)
- * 3. トリガーを設定: syncPerformanceToTursoSeika を15分毎に実行
+ * 機能: 実績rawdata・売上報告rawdataの全メンバーデータをTursoに同期
+ * ダッシュボード側でチーム別フィルタを行う
  */
+
+// ==================== バックフィル（手動実行用） ====================
+
+/**
+ * 全期間の実績・売上報告を一括同期（初回 or リカバリ用）
+ * GASエディタから手動実行してください
+ */
+function backfillAllToTurso() {
+  Logger.log('=== バックフィル開始 ===');
+
+  // 実績rawdata（日付フィルタなし）
+  const perfSheet = SpreadsheetApp.openById(SEIKA_CONFIG.SPREADSHEET_ID)
+    .getSheetByName(SEIKA_CONFIG.PERFORMANCE_SHEET);
+  if (perfSheet) {
+    const lastRow = perfSheet.getLastRow();
+    if (lastRow >= 2) {
+      const allData = perfSheet.getRange(2, 1, lastRow - 1, 8).getValues();
+      const targetRows = allData.filter(row => {
+        const m = String(row[0] || '').trim();
+        const d = new Date(row[2]);
+        return m && !isNaN(d.getTime());
+      });
+      Logger.log('実績バックフィル対象: ' + targetRows.length + '行');
+      let upserted = 0, errors = 0;
+      for (let i = 0; i < targetRows.length; i += SEIKA_CONFIG.BATCH_SIZE) {
+        const batch = targetRows.slice(i, i + SEIKA_CONFIG.BATCH_SIZE);
+        try {
+          const r = upsertPerformanceBatch(batch);
+          upserted += r.success; errors += r.errors;
+        } catch (e) { Logger.log('Batch error: ' + e.message); errors += batch.length; }
+      }
+      Logger.log('実績バックフィル完了: ' + upserted + '件, エラー' + errors + '件');
+    }
+  }
+
+  // 売上報告rawdata（日付フィルタなし）
+  const salesSheet = SpreadsheetApp.openById(SEIKA_CONFIG.SPREADSHEET_ID)
+    .getSheetByName(SEIKA_CONFIG.SALES_SHEET);
+  if (salesSheet) {
+    const lastRow = salesSheet.getLastRow();
+    if (lastRow >= 2) {
+      const allData = salesSheet.getRange(2, 1, lastRow - 1, 16).getValues();
+      const targetRows = allData.filter(row => {
+        const m = String(row[0] || '').trim();
+        const d = new Date(row[4]);
+        return m && !isNaN(d.getTime());
+      });
+      Logger.log('売上報告バックフィル対象: ' + targetRows.length + '行');
+      let upserted = 0, errors = 0;
+      for (let i = 0; i < targetRows.length; i += SEIKA_CONFIG.BATCH_SIZE) {
+        const batch = targetRows.slice(i, i + SEIKA_CONFIG.BATCH_SIZE);
+        try {
+          const r = upsertAppointmentBatch(batch);
+          upserted += r.success; errors += r.errors;
+        } catch (e) { Logger.log('Batch error: ' + e.message); errors += batch.length; }
+      }
+      Logger.log('売上報告バックフィル完了: ' + upserted + '件, エラー' + errors + '件');
+    }
+  }
+
+  Logger.log('=== バックフィル完了 ===');
+}
 
 // ==================== 実績データ同期 ====================
 
 /**
- * 実績rawdataを成果報酬チームメンバーでフィルタしてTursoに同期（15分毎トリガー用）
+ * 実績rawdataを全メンバー分Tursoに同期（15分毎トリガー用）
+ * ※ ダッシュボード側でチームフィルタを行う
  */
 function syncPerformanceToTursoSeika() {
   if (!isBusinessHoursSeika()) {
@@ -47,11 +104,11 @@ function syncPerformanceToTursoSeika() {
 
   const allData = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
 
-  // 成果報酬チームメンバー & 日付範囲でフィルタ
+  // 日付範囲でフィルタ（メンバーフィルタなし = 全員同期）
   const targetRows = [];
   for (const row of allData) {
     const memberName = String(row[0] || '').trim();
-    if (!memberName || !isSeikaTeamMember(memberName)) continue;
+    if (!memberName) continue;
 
     const inputDate = row[2];
     if (!inputDate) continue;
@@ -65,7 +122,7 @@ function syncPerformanceToTursoSeika() {
     }
   }
 
-  Logger.log('成果報酬チーム対象行: ' + targetRows.length + '行（全' + allData.length + '行中）');
+  Logger.log('同期対象行: ' + targetRows.length + '行（全' + allData.length + '行中）');
 
   if (targetRows.length === 0) {
     Logger.log('同期対象データなし');
@@ -88,7 +145,7 @@ function syncPerformanceToTursoSeika() {
     }
   }
 
-  const summary = '成果報酬Turso同期完了: ' + upsertedCount + '件同期, ' + errorCount + '件エラー';
+  const summary = 'Turso実績同期完了: ' + upsertedCount + '件同期, ' + errorCount + '件エラー';
   Logger.log(summary);
 
   if (errorCount > 0) {
@@ -199,7 +256,7 @@ function syncSalesReportToTursoSeika() {
   const targetRows = [];
   for (const row of allData) {
     const memberName = String(row[0] || '').trim();
-    if (!memberName || !isSeikaTeamMember(memberName)) continue;
+    if (!memberName) continue;
 
     const acquisitionDate = row[4]; // E列: 取得日
     if (!acquisitionDate) continue;
@@ -213,7 +270,7 @@ function syncSalesReportToTursoSeika() {
     }
   }
 
-  Logger.log('売上報告 成果報酬チーム対象: ' + targetRows.length + '行');
+  Logger.log('売上報告 同期対象: ' + targetRows.length + '行');
 
   if (targetRows.length === 0) return;
 
