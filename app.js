@@ -1089,6 +1089,57 @@ function createGaugeChart(canvasId, value, max, standardPct, label, subLabel) {
     });
 }
 
+function showMemberDetailPopup(memberName, perfData, appoData, execAppoData_) {
+    const calls = sum(perfData.filter(d => d.member_name === memberName), 'call_count');
+    const pr = sum(perfData.filter(d => d.member_name === memberName), 'pr_count');
+    const appo = sum(perfData.filter(d => d.member_name === memberName), 'appointment_count');
+    const hours = sum(perfData.filter(d => d.member_name === memberName), 'call_hours');
+    const days = new Set(perfData.filter(d => d.member_name === memberName).map(r => r.input_date)).size;
+    const amount = appoData.filter(a => a.member_name === memberName).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execConfirmed = (execAppoData_ || []).filter(a => a.member_name === memberName && a.status === '実施').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+
+    const stats = {
+        calls, pr, appo, amount, execConfirmed, hours, days,
+        dailyCalls: days > 0 ? Math.round(calls / days) : 0,
+        hourly: hours > 0 ? calls / hours : 0,
+        callToPr: calls > 0 ? pr / calls * 100 : 0,
+        prToAppo: pr > 0 ? appo / pr * 100 : 0,
+        callToAppo: calls > 0 ? appo / calls * 100 : 0,
+    };
+
+    const metrics = [
+        { key: 'calls', label: '架電数', fmt: v => v.toLocaleString() },
+        { key: 'pr', label: '着電数', fmt: v => v.toLocaleString() },
+        { key: 'appo', label: 'アポ数', fmt: v => v.toLocaleString() },
+        { key: 'amount', label: '取得金額', fmt: v => '¥' + v.toLocaleString() },
+        { key: 'execConfirmed', label: '実施確定金額', fmt: v => '¥' + v.toLocaleString() },
+        { key: 'hours', label: '架電時間', fmt: v => v.toFixed(1) + 'h' },
+        { key: 'days', label: '稼働日数', fmt: v => v + '日' },
+        { key: 'dailyCalls', label: '日次架電', fmt: v => v.toLocaleString() },
+        { key: 'hourly', label: '1hあたり架電数', fmt: v => v.toFixed(1) },
+        { key: 'callToPr', label: '架→着電率', fmt: v => v.toFixed(1) + '%' },
+        { key: 'prToAppo', label: '着電→アポ率', fmt: v => v.toFixed(1) + '%' },
+        { key: 'callToAppo', label: '架→アポ率', fmt: v => v.toFixed(1) + '%' },
+    ];
+
+    let html = '<div class="member-detail-grid">';
+    metrics.forEach(m => {
+        html += `<div class="member-detail-tile">
+            <div class="md-label">${m.label}</div>
+            <div class="md-value">${m.fmt(stats[m.key])}</div>
+        </div>`;
+    });
+    html += '</div>';
+
+    document.getElementById('memberDetailTitle').textContent = memberName;
+    document.getElementById('memberDetailBody').innerHTML = html;
+    document.getElementById('memberDetailModal').classList.remove('hidden');
+}
+
+function closeMemberDetail() {
+    document.getElementById('memberDetailModal').classList.add('hidden');
+}
+
 function renderManagement(filter) {
     destroyMgmtCharts();
     const ym = filter.month;
@@ -1157,6 +1208,21 @@ function renderManagement(filter) {
     const cancelRateVal = execTotal > 0 ? (execCancelCount / execTotal * 100).toFixed(1) : '0';
     const execConfirmedCount = allExecAppo.filter(a => a.status === '実施').length;
     const execConfirmRateVal = execTotal > 0 ? (execConfirmedCount / execTotal * 100).toFixed(1) : '0';
+
+    // 稼働系KPI
+    const totalHours = sum(allPerf, 'call_hours');
+    const totalWorkDays = new Set(allPerf.map(r => r.member_name + '_' + r.input_date)).size;
+    const totalMemberDays = (() => {
+        const memberDays = {};
+        allPerf.forEach(r => {
+            if (!memberDays[r.member_name]) memberDays[r.member_name] = new Set();
+            memberDays[r.member_name].add(r.input_date);
+        });
+        return Object.values(memberDays).reduce((s, set) => s + set.size, 0);
+    })();
+    const callsPerHour = totalHours > 0 ? (totalCalls / totalHours).toFixed(1) : '0';
+    const callsPerDay = totalMemberDays > 0 ? Math.round(totalCalls / totalMemberDays).toLocaleString() : '0';
+    const hoursPerDay = totalMemberDays > 0 ? (totalHours / totalMemberDays).toFixed(1) : '0';
 
     // ========== 個人別データ準備（ランキング用） ==========
     const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
@@ -1300,6 +1366,9 @@ function renderManagement(filter) {
         <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">月内実施率</div><div class="mgmt-kpi-val">${appoWithinMonthRate}%</div></div>
         <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">キャンセル率</div><div class="mgmt-kpi-val">${cancelRateVal}%</div></div>
         <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">実施確定率</div><div class="mgmt-kpi-val">${execConfirmRateVal}%</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">1hあたり架電数</div><div class="mgmt-kpi-val">${callsPerHour}</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">1日あたり架電数</div><div class="mgmt-kpi-val">${callsPerDay}</div></div>
+        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">1日あたり稼働時間</div><div class="mgmt-kpi-val">${hoursPerDay}h</div></div>
     </div>
 
     <!-- 個人別 取得金額（縦棒グラフ） -->
@@ -1559,10 +1628,18 @@ function renderManagement(filter) {
                 plugins: {
                     legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 16 } },
                     tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ¥${ctx.parsed.y.toLocaleString()}` } }
+                },
+                onClick: (evt, elements, chart) => {
+                    if (elements.length === 0) return;
+                    const idx = elements[0].index;
+                    const name = memberData[idx].name;
+                    showMemberDetailPopup(name, allPerf, allAppo, allExecAppo);
                 }
             },
             plugins: [achievementLabelPlugin]
         });
+        // バーにカーソルを変更
+        barAmountCtx.style.cursor = 'pointer';
     }
 
     // 架電数・着電数・アポ数ランキング

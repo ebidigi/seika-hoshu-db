@@ -463,6 +463,17 @@
         </div>
     </div>
 
+    <!-- 個人別詳細ポップアップ -->
+    <div class="modal-overlay hidden" id="memberDetailModal" onclick="if(event.target===this)closeMemberDetail()">
+        <div class="modal-content" style="max-width:640px;">
+            <div class="modal-header">
+                <h3 id="memberDetailTitle">個人詳細</h3>
+                <button class="modal-close" onclick="closeMemberDetail()">&times;</button>
+            </div>
+            <div id="memberDetailBody"></div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>
