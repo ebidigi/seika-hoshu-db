@@ -2546,11 +2546,14 @@ function renderAppointments() {
     });
     const allData = merged;
 
-    // 今日までフィルタを適用してからサマリ計算
-    let summaryData = allData;
+    // サマリは当月全体（今日以降も含む）
+    const summaryData = allData;
+
+    // テーブル・ドロップダウン用は「今日まで」フィルタを適用
+    let tableBaseData = allData;
     if (!appoShowAll) {
         const today = formatDate(new Date());
-        summaryData = summaryData.filter(a => !a.scheduled_date || a.scheduled_date <= today);
+        tableBaseData = tableBaseData.filter(a => !a.scheduled_date || a.scheduled_date <= today);
     }
 
     const statusCounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
@@ -2562,10 +2565,11 @@ function renderAppointments() {
         }
     });
 
-    // 未確認バッジ
+    // 未確認バッジ（今日までの件数）
     const badge = document.getElementById('unconfirmedBadge');
-    if (statusCounts['未確認'] > 0) {
-        badge.textContent = statusCounts['未確認'];
+    const badgeUnconfirmedCount = tableBaseData.filter(a => a.status === '未確認').length;
+    if (badgeUnconfirmedCount > 0) {
+        badge.textContent = badgeUnconfirmedCount;
         badge.style.display = 'flex';
     } else {
         badge.style.display = 'none';
@@ -2614,21 +2618,21 @@ function renderAppointments() {
     const appoProjectFilter = document.getElementById('appoProjectFilter');
     if (appoMemberFilter) {
         const currentMember = appoMemberFilter.value;
-        const members = [...new Set(summaryData.map(a => a.member_name).filter(Boolean))].sort();
+        const members = [...new Set(tableBaseData.map(a => a.member_name).filter(Boolean))].sort();
         appoMemberFilter.innerHTML = '<option value="all">全担当者</option>' +
             members.map(m => `<option value="${m}">${displayName(m)}</option>`).join('');
         appoMemberFilter.value = members.includes(currentMember) ? currentMember : 'all';
     }
     if (appoProjectFilter) {
         const currentProject = appoProjectFilter.value;
-        const projects = [...new Set(summaryData.map(a => a.project_name).filter(Boolean))].sort();
+        const projects = [...new Set(tableBaseData.map(a => a.project_name).filter(Boolean))].sort();
         appoProjectFilter.innerHTML = '<option value="all">全案件</option>' +
             projects.map(p => `<option value="${p}">${p}</option>`).join('');
         appoProjectFilter.value = projects.includes(currentProject) ? currentProject : 'all';
     }
 
-    // テーブル用データ: summaryData（今日までフィルタ済み） + ステータスフィルタ
-    let filtered = currentAppoFilter === 'all' ? summaryData : summaryData.filter(a => a.status === currentAppoFilter);
+    // テーブル用データ: tableBaseData（今日までフィルタ済み） + ステータスフィルタ
+    let filtered = currentAppoFilter === 'all' ? tableBaseData : tableBaseData.filter(a => a.status === currentAppoFilter);
 
     // メンバーフィルタ
     const selectedMember = appoMemberFilter ? appoMemberFilter.value : 'all';
