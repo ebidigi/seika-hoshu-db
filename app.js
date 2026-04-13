@@ -1236,10 +1236,12 @@ function renderManagement(filter) {
             const mPerf = allPerf.filter(d => d.member_name === memberName);
             const mAppo = allAppo.filter(d => d.member_name === memberName);
             const mAppoAmount = mAppo.reduce((s, a) => s + (a.amount || 0), 0);
+            const mNewAmount = mAppo.filter(a => (a.memo || '').includes('新規')).reduce((s, a) => s + (a.amount || 0), 0);
+            const mExistingAmount = mAppoAmount - mNewAmount;
             const mCallCount = sum(mPerf, 'call_count');
             const mPrCount = sum(mPerf, 'pr_count');
             const mAppoCount = sum(mPerf, 'appointment_count');
-            memberData.push({ name: memberName, target: mAcqTarget, actual: mAppoAmount, calls: mCallCount, pr: mPrCount, appo: mAppoCount });
+            memberData.push({ name: memberName, target: mAcqTarget, actual: mAppoAmount, actualNew: mNewAmount, actualExisting: mExistingAmount, calls: mCallCount, pr: mPrCount, appo: mAppoCount });
         });
     });
 
@@ -1372,7 +1374,7 @@ function renderManagement(filter) {
     </div>
 
     <!-- 個人別 取得金額（縦棒グラフ） -->
-    <div class="section-title" style="margin-top:28px;">個人別 取得金額 目標 vs 実績</div>
+    <div class="section-title" style="margin-top:28px;">個人別 取得金額 目標 vs 実績（既存/新規）</div>
     <div class="mgmt-chart-container"><canvas id="mgmtBarAmount"></canvas></div>
 
     <!-- 個人別 ランキング3列 -->
@@ -1591,15 +1593,18 @@ function renderManagement(filter) {
             id: 'achievementLabels',
             afterDatasetsDraw(chart) {
                 const { ctx: c } = chart;
-                const meta = chart.getDatasetMeta(1); // 実績dataset
+                const metaNew = chart.getDatasetMeta(2); // 新規dataset（スタック最上部）
+                const metaExisting = chart.getDatasetMeta(1); // 既存dataset
                 c.save();
                 c.textAlign = 'center';
                 c.textBaseline = 'bottom';
                 c.font = '700 10px "Poppins", sans-serif';
-                meta.data.forEach((bar, i) => {
+                metaNew.data.forEach((bar, i) => {
                     const a = memberAchievements[i];
                     c.fillStyle = a.color;
-                    c.fillText(a.pct, bar.x, bar.y - 4);
+                    // 新規が0の場合は既存バーの上端を使用
+                    const topBar = memberData[i].actualNew > 0 ? bar : metaExisting.data[i];
+                    c.fillText(a.pct, topBar.x, topBar.y - 4);
                 });
                 c.restore();
             }
@@ -1610,20 +1615,17 @@ function renderManagement(filter) {
             data: {
                 labels: memberData.map(d => d.name),
                 datasets: [
-                    { label: '目標', data: memberData.map(d => d.target), backgroundColor: '#e0e0e0', borderRadius: 4, barPercentage: 0.6, categoryPercentage: 0.7 },
-                    { label: '実績', data: memberData.map(d => d.actual), backgroundColor: memberData.map(d => {
-                        if (d.target <= 0) return '#86aaec';
-                        const r = d.actual / d.target * 100;
-                        return r >= standardProgress ? '#86aaec' : r >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
-                    }), borderRadius: 4, barPercentage: 0.6, categoryPercentage: 0.7 }
+                    { label: '目標', data: memberData.map(d => d.target), backgroundColor: '#e0e0e0', borderRadius: 4, barPercentage: 0.6, categoryPercentage: 0.7, stack: 'target' },
+                    { label: '既存', data: memberData.map(d => d.actualExisting), backgroundColor: '#86aaec', borderRadius: 0, barPercentage: 0.6, categoryPercentage: 0.7, stack: 'actual' },
+                    { label: '新規', data: memberData.map(d => d.actualNew), backgroundColor: '#f59e0b', borderRadius: { topLeft: 4, topRight: 4, bottomLeft: 0, bottomRight: 0 }, barPercentage: 0.6, categoryPercentage: 0.7, stack: 'actual' }
                 ]
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
                 layout: { padding: { top: 16 } },
                 scales: {
-                    y: { beginAtZero: true, ticks: { callback: v => '¥' + (v / 10000).toFixed(0) + '万', font: { size: 10 } }, grid: { color: '#f0f0f0' } },
-                    x: { ticks: { font: { size: 11, family: '"Noto Sans JP"' } }, grid: { display: false } }
+                    y: { beginAtZero: true, stacked: true, ticks: { callback: v => '¥' + (v / 10000).toFixed(0) + '万', font: { size: 10 } }, grid: { color: '#f0f0f0' } },
+                    x: { stacked: true, ticks: { font: { size: 11, family: '"Noto Sans JP"' } }, grid: { display: false } }
                 },
                 plugins: {
                     legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 16 } },
