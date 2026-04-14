@@ -1259,10 +1259,12 @@ function renderManagement(filter) {
         const capAmount = capCount * unitPrice;
         const consumeRate = capCount > 0 ? Math.round(actualCount / capCount * 100) : 0;
         const remaining = capCount > 0 ? capCount - actualCount : null;
+        const cancelCount = projAppo.filter(a => a.status === 'キャンセル').length;
+        const cancelRate = actualCount > 0 ? Math.round(cancelCount / actualCount * 100) : 0;
         const callToPr = callCount > 0 ? (prCount / callCount * 100).toFixed(1) : '-';
         const prToAppo = prCount > 0 ? (appoCount / prCount * 100).toFixed(1) : '-';
         const callToAppo = callCount > 0 ? (appoCount / callCount * 100).toFixed(1) : '-';
-        return { name: proj.project_name, unitPrice, capCount, capAmount, actualCount, actualAmount, consumeRate, remaining, callToPr, prToAppo, callToAppo };
+        return { name: proj.project_name, unitPrice, capCount, capAmount, actualCount, actualAmount, consumeRate, remaining, cancelCount, cancelRate, callToPr, prToAppo, callToAppo };
     }).filter(c => c.capCount > 0 || c.actualCount > 0);
 
     // 案件テーブルHTML
@@ -1270,13 +1272,15 @@ function renderManagement(filter) {
         <th>案件名</th><th class="text-right">単価</th>
         <th class="text-right" style="background:#eef3fb;color:#6b8cba;">キャップ</th><th class="text-right" style="background:#eef3fb;color:#6b8cba;">キャップ金額</th>
         <th class="text-right">取得数</th><th class="text-right">取得金額</th><th class="text-right">消化率</th><th class="text-right">残り</th>
+        <th class="text-right" style="background:#fdf2f0;color:#c0392b;">キャンセル率</th>
         <th class="text-right">架→着電</th><th class="text-right">着電→アポ</th><th class="text-right">架→アポ</th>
     </tr></thead><tbody>`;
-    let ttCapCount = 0, ttActCount = 0, ttCapAmt = 0, ttActAmt = 0;
+    let ttCapCount = 0, ttActCount = 0, ttCapAmt = 0, ttActAmt = 0, ttCancelCount = 0;
     capData.forEach(c => {
         ttCapCount += c.capCount; ttActCount += c.actualCount;
-        ttCapAmt += c.capAmount; ttActAmt += c.actualAmount;
+        ttCapAmt += c.capAmount; ttActAmt += c.actualAmount; ttCancelCount += c.cancelCount;
         const cColor = c.consumeRate >= 90 ? '#ef947a' : c.consumeRate >= 70 ? '#ede07d' : '#86aaec';
+        const crColor = c.cancelRate >= 20 ? '#c0392b' : c.cancelRate >= 15 ? '#e67e22' : '#2d3436';
         projTableHtml += `<tr>
             <td style="font-weight:600;">${escapeHtml(c.name)}</td>
             <td class="text-right">¥${c.unitPrice.toLocaleString()}</td>
@@ -1286,6 +1290,7 @@ function renderManagement(filter) {
             <td class="text-right">¥${c.actualAmount.toLocaleString()}</td>
             <td class="text-right" style="font-weight:600;color:${cColor};">${c.capCount > 0 ? c.consumeRate + '%' : '-'}</td>
             <td class="text-right">${c.remaining !== null ? c.remaining + '件' : '-'}</td>
+            <td class="text-right" style="background:#fdf8f7;font-weight:600;color:${crColor};">${c.actualCount > 0 ? c.cancelRate + '%' : '-'}<span style="font-weight:400;font-size:0.7rem;color:#999;"> (${c.cancelCount}件)</span></td>
             <td class="text-right">${c.callToPr}%</td>
             <td class="text-right">${c.prToAppo}%</td>
             <td class="text-right">${c.callToAppo}%</td>
@@ -1297,6 +1302,7 @@ function renderManagement(filter) {
         <td class="text-right">${ttActCount}件</td><td class="text-right">¥${ttActAmt.toLocaleString()}</td>
         <td class="text-right">${ttCapCount > 0 ? Math.round(ttActCount / ttCapCount * 100) + '%' : '-'}</td>
         <td class="text-right">${ttCapCount > 0 ? (ttCapCount - ttActCount) + '件' : '-'}</td>
+        <td class="text-right" style="background:#fdf8f7;font-weight:600;color:${(ttActCount > 0 ? Math.round(ttCancelCount / ttActCount * 100) : 0) >= 15 ? '#c0392b' : '#2d3436'};">${ttActCount > 0 ? Math.round(ttCancelCount / ttActCount * 100) + '%' : '-'}<span style="font-weight:400;font-size:0.7rem;color:#999;"> (${ttCancelCount}件)</span></td>
         <td></td><td></td><td></td>
     </tr></tfoot></table></div>`;
 
