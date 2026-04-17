@@ -171,6 +171,12 @@ INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('坪井', '坪井
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('池田', '坪井Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('村松', '坪井Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中か', '三善Team');
+-- チーム未所属（4月アポ実績反映用）
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('川上', '未所属');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('中村ゆ', '未所属');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('宮城一平', '未所属');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('岸田', '未所属');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田山', '未所属');
 -- 非アクティブ
 INSERT OR IGNORE INTO members (member_name, team_name, status) VALUES ('菊池', '菊池Team', 'inactive');
 INSERT OR IGNORE INTO members (member_name, team_name, status) VALUES ('辻森', '野口Team', 'inactive');

@@ -128,7 +128,8 @@ const MEMBER_NAME_NORMALIZE = {
     '美除直生': '美除', '美除 直生': '美除', '@美除直生': '美除',
     '中村 峻也': '中村た', '中村峻也': '中村た', '@中村 峻也/nakamura takaya': '中村た',
     '田中克樹': '田中か', '@田中克樹/katsuki tanaka': '田中か',
-    '宮城 啓生': '宮城', '宮城啓生': '宮城', '@宮城 啓生/miyagi hiroki': '宮城', '宮城一平': '宮城', '@宮城一平': '宮城',
+    '宮城 啓生': '宮城', '宮城啓生': '宮城', '@宮城 啓生/miyagi hiroki': '宮城',
+    '宮城一平': '宮城一平', '宮城 一平': '宮城一平', '@宮城一平': '宮城一平',
     '@田中颯汰/tanaka sota': '田中颯汰',
     '村上夢果': '村上', '村上 夢果': '村上', '@村上夢果': '村上',
     '三善一樹': '三善', '三善 一樹': '三善', '@三善一樹/miyoshi itsuki': '三善',
@@ -196,7 +197,7 @@ function getTeamsForMonth(ym) {
 // 指定月にアクティブなチーム名一覧
 function getActiveTeamNames(ym) {
     const membership = getTeamsForMonth(ym);
-    return [...new Set(Object.values(membership))].filter(t => t !== '所属なし' && !EXCLUDED_TEAMS.includes(t)).sort();
+    return [...new Set(Object.values(membership))].filter(t => t !== '所属なし' && t !== '未所属' && !EXCLUDED_TEAMS.includes(t)).sort();
 }
 
 // 除外チームのメンバー名一覧を取得
@@ -341,10 +342,28 @@ function computeTeamStats(teamName, ym) {
     };
 }
 
+// ==================== メンバー自動登録 ====================
+async function ensureMembers() {
+    const requiredMembers = [
+        { name: '川上', team: '未所属' },
+        { name: '中村ゆ', team: '未所属' },
+        { name: '宮城一平', team: '未所属' },
+        { name: '岸田', team: '未所属' },
+        { name: '田山', team: '未所属' },
+    ];
+    for (const m of requiredMembers) {
+        await queryTurso(
+            "INSERT OR IGNORE INTO members (id, member_name, team_name) VALUES (lower(hex(randomblob(16))), ?, ?)",
+            [m.name, m.team]
+        );
+    }
+}
+
 // ==================== データ読み込み ====================
 async function loadAllData() {
     showLoading();
     try {
+        await ensureMembers();
         console.log('Loading master data...');
         const results = await Promise.all([
             queryTurso("SELECT * FROM members WHERE status = 'active' ORDER BY team_name, member_name"),
