@@ -344,6 +344,7 @@ function computeTeamStats(teamName, ym) {
 
 // ==================== メンバー自動登録 ====================
 async function ensureMembers() {
+    // 未登録メンバーの追加
     const requiredMembers = [
         { name: '川上', team: '未所属' },
         { name: '中村ゆ', team: '未所属' },
@@ -357,6 +358,10 @@ async function ensureMembers() {
             [m.name, m.team]
         );
     }
+    // inactiveになっている対象メンバーをactiveに復帰
+    await queryTurso(
+        "UPDATE members SET status = 'active' WHERE member_name IN ('田中か', '村松', '美除') AND status != 'active'"
+    );
 }
 
 // ==================== データ読み込み ====================
