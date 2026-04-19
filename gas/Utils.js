@@ -45,7 +45,7 @@ const MEMBER_NAME_MAP = {
   '田中颯汰': '田中颯汰',
   '宮城 啓生': '宮城',
   '宮城啓生': '宮城',
-  '宮城一平': '宮城',
+  '宮城一平': '宮城一平',
   '野口純': '野口',
   '野口 純': '野口',
   '坪井 秀斗': '坪井',
@@ -112,7 +112,35 @@ const MEMBER_NAME_MAP = {
   '海老根涼太': '海老根',
   '海老根 涼太': '海老根',
   '田中克樹': '田中か',
-  '田中 克樹': '田中か'
+  '田中 克樹': '田中か',
+  // メールアドレス → DB正規名
+  'k.matsui@digi-man.com': '松居',
+  's.tsuboi@digi-man.com': '坪井',
+  'j.noguchi@digi-man.com': '野口',
+  'a.ikeda@digi-man.com': '池田',
+  'y.horikiri@digi-man.com': '堀切',
+  'r.todoroki@digi-man.com': '轟',
+  'k.kawakami@digi-man.com': '川上',
+  'katsu.tanaka@digi-man.com': '田中か',
+  'k.muramatsu@digi-man.com': '村松',
+  'h.miyagi@digi-man.com': '宮城',
+  'i.miyagi@digi-man.com': '宮城一平',
+  'y.nakamura@digi-man.com': '中村ゆ',
+  't.nakamura@digi-man.com': '中村た',
+  'r.nakamura@digi-man.com': '中村り',
+  'r.shimizu@digi-man.com': '清水',
+  't.akimoto@digi-man.com': '秋元',
+  'r.sasada@digi-man.com': '笹田',
+  'y.kokabu@digi-man.com': '小甲',
+  'd.masuya@digi-man.com': '増谷',
+  's.konishi@digi-man.com': '小西',
+  'y.tayama@digi-man.com': '田山',
+  'y.kawano@digi-man.com': '川野',
+  'h.namai@digi-man.com': '生井',
+  'r.ebine@digi-man.com': '海老根',
+  't.sakai@digi-man.com': '堺',
+  'k.kikuchi@digi-man.com': '菊池',
+  'k.miyoshi@digi-man.com': '三善',
 };
 
 // スプレッドシート案件名 → DB正規名マッピング
@@ -135,6 +163,12 @@ function normalizeProjectName(rawName) {
 function normalizeMemberName(rawName) {
   if (!rawName) return '';
   let name = String(rawName).trim();
+
+  // メールアドレス＋付加テキスト対応（例: "k.yamada@digi-man.com　香苗"）
+  const emailMatch = name.match(/^([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  if (emailMatch) {
+    name = emailMatch[1];
+  }
 
   // Slack形式 "@名前/id" から名前部分を抽出
   const slackMatch = name.match(/^@(.+?)\//);

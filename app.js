@@ -156,11 +156,45 @@ const MEMBER_NAME_NORMALIZE = {
     '中村凌': '中村り', '中村 凌': '中村り', '@中村凌/nakamura ryo': '中村り',
     '生井響': '生井', '生井 響': '生井', '@生井 響': '生井',
     '海老根涼太': '海老根', '海老根 涼太': '海老根', '@海老根涼太/ebine ryota': '海老根',
+    // メールアドレス → DB正規名
+    'k.matsui@digi-man.com': '松居',
+    's.tsuboi@digi-man.com': '坪井',
+    'j.noguchi@digi-man.com': '野口',
+    'a.ikeda@digi-man.com': '池田',
+    'y.horikiri@digi-man.com': '堀切',
+    'r.todoroki@digi-man.com': '轟',
+    'k.kawakami@digi-man.com': '川上',
+    'katsu.tanaka@digi-man.com': '田中か',
+    'k.muramatsu@digi-man.com': '村松',
+    'h.miyagi@digi-man.com': '宮城',
+    'i.miyagi@digi-man.com': '宮城一平',
+    'y.nakamura@digi-man.com': '中村ゆ',
+    't.nakamura@digi-man.com': '中村た',
+    'r.nakamura@digi-man.com': '中村り',
+    'r.shimizu@digi-man.com': '清水',
+    't.akimoto@digi-man.com': '秋元',
+    'r.sasada@digi-man.com': '笹田',
+    'y.kokabu@digi-man.com': '小甲',
+    'd.masuya@digi-man.com': '増谷',
+    's.konishi@digi-man.com': '小西',
+    'y.tayama@digi-man.com': '田山',
+    'y.kawano@digi-man.com': '川野',
+    'h.namai@digi-man.com': '生井',
+    'r.ebine@digi-man.com': '海老根',
+    't.sakai@digi-man.com': '堺',
+    'k.kikuchi@digi-man.com': '菊池',
+    'k.miyoshi@digi-man.com': '三善',
 };
 
 function normalizeMemberName(name) {
     if (!name) return name;
     if (MEMBER_NAME_NORMALIZE[name]) return MEMBER_NAME_NORMALIZE[name];
+    // メールアドレス＋付加テキスト対応（例: "k.yamada@digi-man.com　香苗"）
+    const emailMatch = name.match(/^([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    if (emailMatch) {
+        const email = emailMatch[1];
+        if (MEMBER_NAME_NORMALIZE[email]) return MEMBER_NAME_NORMALIZE[email];
+    }
     // @名前/id 形式のフォールバック
     const m = name.match(/^@(.+?)\//);
     if (m) {
