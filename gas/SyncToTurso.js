@@ -210,7 +210,7 @@ function upsertPerformanceBatch(rows) {
   let success = 0;
   let errors = 0;
   for (const r of result.results) {
-    if (r.type === 'ok') success++;
+    if (r.type === 'ok' && r.response && r.response.type === 'execute') success++;
     else if (r.type === 'error') {
       Logger.log('SQL error: ' + (r.error ? r.error.message : 'unknown'));
       errors++;
@@ -395,8 +395,11 @@ function upsertAppointmentBatch(rows) {
   let success = 0;
   let errors = 0;
   for (const r of result.results) {
-    if (r.type === 'ok') success++;
-    else if (r.type === 'error') errors++;
+    if (r.type === 'ok' && r.response && r.response.type === 'execute') success++;
+    else if (r.type === 'error') {
+      Logger.log('Appo SQL error: ' + (r.error ? r.error.message : 'unknown'));
+      errors++;
+    }
   }
 
   return { success, errors };
@@ -504,8 +507,8 @@ function cleanupNonCanonicalNames() {
     var result = executeTursoPipeline(requests);
     var totalAffected = 0;
     for (var j = 0; j < result.results.length; j++) {
-      if (result.results[j].type === 'ok') {
-        totalAffected += result.results[j].response.result.affected_row_count || 0;
+      if (result.results[j].type === 'ok' && result.results[j].response && result.results[j].response.type === 'execute') {
+        totalAffected += (result.results[j].response.result && result.results[j].response.result.affected_row_count) || 0;
       }
     }
     if (totalAffected > 0) {
@@ -514,4 +517,84 @@ function cleanupNonCanonicalNames() {
   } catch (e) {
     Logger.log('クリーンアップエラー: ' + e.message);
   }
+}
+
+// ==================== 診断用（手動実行） ====================
+
+/**
+ * Turso接続とINSERTの診断テスト
+ * GASエディタから手動実行してログを確認
+ */
+function diagnoseTursoSync() {
+  Logger.log('=== Turso同期 診断開始 ===');
+
+  // 1. 接続設定の確認
+  var config = getTursoConfig();
+  var httpUrl = config.url ? config.url.replace('libsql://', 'https://') : '(未設定)';
+  Logger.log('Turso URL: ' + httpUrl);
+  Logger.log('Token設定: ' + (config.token ? '有 (' + config.token.length + '文字)' : '無'));
+
+  // 2. SELECT テスト
+  try {
+    var selectResult = executeTursoPipeline([
+      { type: 'execute', stmt: { sql: "SELECT COUNT(*) as cnt FROM performance_rawdata" } }
+    ]);
+    var cnt = selectResult.results[0].response.result.rows[0][0].value;
+    Logger.log('SELECT テスト成功: performance_rawdata = ' + cnt + '行');
+  } catch (e) {
+    Logger.log('SELECT テスト失敗: ' + e.message);
+    Logger.log('=== 診断終了（接続エラー） ===');
+    return;
+  }
+
+  // 3. INSERT テスト（1行だけ）
+  try {
+    var testResult = executeTursoPipeline([{
+      type: 'execute',
+      stmt: {
+        sql: "INSERT OR REPLACE INTO performance_rawdata (id, member_name, project_name, input_date, call_hours, call_count, pr_count, appointment_count, appointment_amount, updated_at) VALUES (COALESCE((SELECT id FROM performance_rawdata WHERE member_name = ? AND project_name = ? AND input_date = ?), lower(hex(randomblob(16)))), ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+        args: [
+          {type:'text',value:'__診断テスト__'}, {type:'text',value:'__テスト案件__'}, {type:'text',value:'2000-01-01'},
+          {type:'text',value:'__診断テスト__'}, {type:'text',value:'__テスト案件__'}, {type:'text',value:'2000-01-01'},
+          {type:'float',value:0}, {type:'integer',value:'0'}, {type:'integer',value:'0'}, {type:'integer',value:'0'}, {type:'integer',value:'0'}
+        ]
+      }
+    }]);
+
+    var insertRes = testResult.results[0];
+    if (insertRes.type === 'ok') {
+      Logger.log('INSERT テスト成功');
+      // テストデータを削除
+      executeTursoPipeline([{
+        type: 'execute',
+        stmt: { sql: "DELETE FROM performance_rawdata WHERE member_name = '__診断テスト__'" }
+      }]);
+      Logger.log('テストデータ削除完了');
+    } else {
+      Logger.log('INSERT テスト失敗: ' + JSON.stringify(insertRes.error));
+    }
+  } catch (e) {
+    Logger.log('INSERT テスト例外: ' + e.message);
+  }
+
+  // 4. スプレッドシートの先頭5行をサンプル表示
+  try {
+    var sheet = SpreadsheetApp.openById(SEIKA_CONFIG.SPREADSHEET_ID)
+      .getSheetByName(SEIKA_CONFIG.PERFORMANCE_SHEET);
+    if (sheet) {
+      var sample = sheet.getRange(2, 1, Math.min(5, sheet.getLastRow() - 1), 8).getValues();
+      for (var i = 0; i < sample.length; i++) {
+        var row = sample[i];
+        var name = String(row[0] || '').trim();
+        var normalized = normalizeMemberName(name);
+        var dateVal = row[2];
+        var formatted = formatDateGAS(dateVal);
+        Logger.log('行' + (i+2) + ': 名前=[' + name + '] → [' + normalized + '], 日付=[' + dateVal + '] → [' + formatted + ']');
+      }
+    }
+  } catch (e) {
+    Logger.log('スプレッドシート読み取りエラー: ' + e.message);
+  }
+
+  Logger.log('=== Turso同期 診断完了 ===');
 }
