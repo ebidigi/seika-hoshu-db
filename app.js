@@ -1,8 +1,5 @@
 // ==================== Turso DB 設定 ====================
-const TURSO_CONFIG = {
-    url: 'https://seika-hoshu-db-ebidigi-ebidigi.aws-ap-northeast-1.turso.io',
-    authToken: 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzMxMDE2NTgsImlkIjoiMDE5Y2Q1MTgtMTYwMS03NDUzLTg2NTktZDdhZGRhNDY2ZDJhIiwicmlkIjoiNDQ4MTQ4ODAtZDdlZS00NTBlLWFjYTgtMDczYzI2Njk2MDhlIn0.YuB6UZYWy9iE1MxrQe4oKX7OyPjAqtT12RRZeaOzjSueyqR9_HbZUPvmPhiK8fQi-5a3iK3CqkG4lLhVrRn1Cg'
-};
+// TURSO_CONFIG は config.js から読み込み（セキュリティのためGit管理外）
 
 // ==================== グローバル状態 ====================
 let currentTab = 'management';

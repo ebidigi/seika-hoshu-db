@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Environment files
+.env
+*.env
+
+# Config (contains secrets)
+config.js
+
+# Dependencies
+node_modules/
+
+# Claude Code
+.claude/
+
+# Data files
+*.csv
