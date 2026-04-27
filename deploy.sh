@@ -65,4 +65,47 @@ with open(dest_file, 'w') as f:
 
 print(f"デプロイ完了: {dest_file}")
 print(f"ブラウザで確認: file://{dest_file}")
+
+# === Admin画面のビルド ===
+admin_path = os.path.join(source_dir, 'admin.html')
+if os.path.exists(admin_path):
+    dest_admin = dest_file.replace('seika_hoshu_db.html', 'seika_hoshu_admin.html')
+
+    with open(admin_path, 'r') as f:
+        admin_html = f.read()
+
+    admin_css_path = os.path.join(source_dir, 'admin.css')
+    admin_css = ''
+    if os.path.exists(admin_css_path):
+        with open(admin_css_path, 'r') as f:
+            admin_css = f.read()
+
+    admin_js_path = os.path.join(source_dir, 'admin.js')
+    admin_js = ''
+    if os.path.exists(admin_js_path):
+        with open(admin_js_path, 'r') as f:
+            admin_js = f.read()
+
+    admin_html = admin_html.replace(
+        '<script src="config.js"></script>',
+        '<script>\n' + config_js + '\n</script>'
+    )
+    admin_html = admin_html.replace(
+        '<link rel="stylesheet" href="style.css">',
+        '<style>\n' + css + '\n</style>'
+    )
+    admin_html = admin_html.replace(
+        '<link rel="stylesheet" href="admin.css">',
+        '<style>\n' + admin_css + '\n</style>'
+    )
+    admin_html = admin_html.replace(
+        '<script src="admin.js"></script>',
+        '<script>\n' + admin_js + '\n</script>'
+    )
+
+    with open(dest_admin, 'w') as f:
+        f.write(admin_html)
+
+    print(f"Admin デプロイ完了: {dest_admin}")
+    print(f"ブラウザで確認: file://{dest_admin}")
 PYEOF

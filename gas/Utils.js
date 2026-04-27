@@ -141,6 +141,10 @@ const MEMBER_NAME_MAP = {
   't.sakai@digi-man.com': '堺',
   'k.kikuchi@digi-man.com': '菊池',
   'k.miyoshi@digi-man.com': '三善',
+  'y.murakami@digi-man.com': '村上',
+  's.yamamoto@digi-man.com': '山本',
+  's.tanaka@digi-man.com': '田中颯汰',
+  'j.nogami@digi-man.com': '野上',
 };
 
 // スプレッドシート案件名 → DB正規名マッピング

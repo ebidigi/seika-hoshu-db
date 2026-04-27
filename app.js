@@ -428,6 +428,7 @@ async function loadAllData() {
         populateDailyTargetMember();
 
         await loadMonthData();
+        loadMappings();
 
         document.getElementById('lastUpdated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
     } catch (error) {
@@ -4437,6 +4438,184 @@ function escapeHtml(str) {
 function displayName(memberName) {
     const member = membersData.find(m => m.member_name === memberName);
     return (member && member.display_name) ? member.display_name : memberName;
+}
+
+// ==================== 名前マッピング管理 ====================
+let mappingsData = [];
+let editingMappingId = null;
+
+async function loadMappings() {
+    try {
+        mappingsData = await queryTurso('SELECT * FROM member_name_mappings ORDER BY canonical_name, raw_name');
+        renderMappingsTable();
+    } catch (e) {
+        console.error('マッピング読み込みエラー:', e);
+    }
+}
+
+function renderMappingsTable() {
+    const tbody = document.getElementById('mappingTableBody');
+    if (!tbody) return;
+    const search = (document.getElementById('mappingSearchInput')?.value || '').toLowerCase();
+    const filtered = search
+        ? mappingsData.filter(m => m.raw_name.toLowerCase().includes(search) || m.canonical_name.toLowerCase().includes(search))
+        : mappingsData;
+
+    tbody.textContent = '';
+    if (filtered.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.style.textAlign = 'center';
+        td.style.color = 'var(--text-light)';
+        td.style.padding = '24px';
+        td.textContent = 'データなし';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+    }
+    filtered.forEach(m => {
+        const tr = document.createElement('tr');
+        const tdRaw = document.createElement('td');
+        tdRaw.textContent = m.raw_name;
+        const tdCanon = document.createElement('td');
+        const strong = document.createElement('strong');
+        strong.textContent = m.canonical_name;
+        tdCanon.appendChild(strong);
+        const tdAction = document.createElement('td');
+        const btnEdit = document.createElement('button');
+        btnEdit.className = 'btn-small';
+        btnEdit.textContent = '編集';
+        btnEdit.onclick = () => openMappingForm(m.id);
+        const btnDel = document.createElement('button');
+        btnDel.className = 'btn-small btn-danger-small';
+        btnDel.textContent = '削除';
+        btnDel.onclick = () => deleteMapping(m.id);
+        tdAction.appendChild(btnEdit);
+        tdAction.appendChild(document.createTextNode(' '));
+        tdAction.appendChild(btnDel);
+        tr.appendChild(tdRaw);
+        tr.appendChild(tdCanon);
+        tr.appendChild(tdAction);
+        tbody.appendChild(tr);
+    });
+}
+
+function filterMappingsTable() {
+    renderMappingsTable();
+}
+
+function openMappingForm(id) {
+    editingMappingId = id || null;
+    const modal = document.getElementById('mappingFormModal');
+    const title = document.getElementById('mappingFormTitle');
+    const rawInput = document.getElementById('mappingFormRawName');
+    const canonSelect = document.getElementById('mappingFormCanonical');
+
+    canonSelect.textContent = '';
+    membersData.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.member_name;
+        opt.textContent = m.member_name;
+        canonSelect.appendChild(opt);
+    });
+
+    if (id) {
+        const mapping = mappingsData.find(x => x.id === id);
+        if (mapping) {
+            title.textContent = 'マッピング編集';
+            rawInput.value = mapping.raw_name;
+            canonSelect.value = mapping.canonical_name;
+            rawInput.readOnly = true;
+        }
+    } else {
+        title.textContent = '新規マッピング追加';
+        rawInput.value = '';
+        rawInput.readOnly = false;
+        if (canonSelect.options.length > 0) canonSelect.selectedIndex = 0;
+    }
+    modal.classList.remove('hidden');
+}
+
+function closeMappingForm() {
+    document.getElementById('mappingFormModal').classList.add('hidden');
+    editingMappingId = null;
+}
+
+async function submitMappingForm() {
+    const rawName = document.getElementById('mappingFormRawName').value.trim();
+    const canonical = document.getElementById('mappingFormCanonical').value;
+    if (!rawName || !canonical) return;
+
+    try {
+        if (editingMappingId) {
+            await executeTurso('UPDATE member_name_mappings SET canonical_name = ? WHERE id = ?', [canonical, editingMappingId]);
+        } else {
+            await executeTurso(
+                'INSERT INTO member_name_mappings (id, raw_name, canonical_name) VALUES (lower(hex(randomblob(16))), ?, ?)',
+                [rawName, canonical]
+            );
+        }
+        closeMappingForm();
+        await loadMappings();
+        showToast('マッピングを保存しました');
+    } catch (e) {
+        showToast('保存エラー: ' + e.message, true);
+    }
+}
+
+async function deleteMapping(id) {
+    if (!confirm('このマッピングを削除しますか？')) return;
+    try {
+        await executeTurso('DELETE FROM member_name_mappings WHERE id = ?', [id]);
+        await loadMappings();
+        showToast('マッピングを削除しました');
+    } catch (e) {
+        showToast('削除エラー: ' + e.message, true);
+    }
+}
+
+async function migrateGASMappings() {
+    if (!confirm('GASのMEMBER_NAME_MAPデータをDBに移行します。既存データと重複する場合はスキップされます。続けますか？')) return;
+
+    const gasMap = [
+        ['tanaka sota', '田中颯汰'], ['中村 峻也', '中村た'], ['中村峻也', '中村た'],
+        ['田中克樹', '田中か'], ['田中颯汰', '田中颯汰'], ['宮城 啓生', '宮城'], ['宮城啓生', '宮城'],
+        ['宮城一平', '宮城一平'], ['野口純', '野口'], ['野口 純', '野口'],
+        ['坪井 秀斗', '坪井'], ['坪井秀斗', '坪井'], ['松居和輝', '松居'], ['松居 和輝', '松居'],
+        ['村松和哉', '村松'], ['村松 和哉', '村松'], ['辻森誠也', '辻森'], ['辻森 誠也', '辻森'],
+        ['山本匠太郎', '山本'], ['山本 匠太郎', '山本'], ['美除直生', '美除'], ['美除 直生', '美除'],
+        ['村上夢果', '村上'], ['村上 夢果', '村上'], ['三善一樹', '三善'], ['三善 一樹', '三善'],
+        ['菊池幸平', '菊池'], ['菊池 幸平', '菊池'], ['野上樹哉', '野上'], ['野上 樹哉', '野上'],
+        ['池田愛', '池田'], ['池田 愛', '池田'], ['轟玲音', '轟'], ['轟 玲音', '轟'],
+        ['清水陸斗', '清水'], ['清水 陸斗', '清水'], ['堀切友世', '堀切'], ['堀切 友世', '堀切'],
+        ['k.matsui@digi-man.com', '松居'], ['s.tsuboi@digi-man.com', '坪井'],
+        ['j.noguchi@digi-man.com', '野口'], ['a.ikeda@digi-man.com', '池田'],
+        ['y.horikiri@digi-man.com', '堀切'], ['r.todoroki@digi-man.com', '轟'],
+        ['k.kawakami@digi-man.com', '川上'], ['katsu.tanaka@digi-man.com', '田中か'],
+        ['k.muramatsu@digi-man.com', '村松'], ['h.miyagi@digi-man.com', '宮城'],
+        ['i.miyagi@digi-man.com', '宮城一平'], ['y.nakamura@digi-man.com', '中村ゆ'],
+        ['t.nakamura@digi-man.com', '中村た'], ['r.shimizu@digi-man.com', '清水'],
+        ['k.kikuchi@digi-man.com', '菊池'], ['k.miyoshi@digi-man.com', '三善'],
+        ['y.murakami@digi-man.com', '村上'], ['s.yamamoto@digi-man.com', '山本'],
+        ['s.tanaka@digi-man.com', '田中颯汰'], ['j.nogami@digi-man.com', '野上'],
+        ['y.tayama@digi-man.com', '田山'],
+    ];
+
+    let success = 0, skipped = 0;
+    for (const [raw, canonical] of gasMap) {
+        try {
+            await executeTurso(
+                'INSERT OR IGNORE INTO member_name_mappings (id, raw_name, canonical_name) VALUES (lower(hex(randomblob(16))), ?, ?)',
+                [raw, canonical]
+            );
+            success++;
+        } catch (e) {
+            skipped++;
+        }
+    }
+    await loadMappings();
+    showToast('GASデータ移行完了: ' + success + '件処理');
 }
 
 // ==================== フィードバック/改修依頼 ====================

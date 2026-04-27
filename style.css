@@ -2493,6 +2493,28 @@ th.sortable:hover { background: var(--gray-200); }
     font-size: 0.85rem;
 }
 
+/* ========== 小ボタン (マッピング管理等) ========== */
+.btn-small {
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-white);
+    cursor: pointer;
+    color: var(--text-dark);
+}
+.btn-small:hover { background: var(--gray-100); }
+.btn-danger-small {
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 1px solid var(--red-200);
+    border-radius: 4px;
+    background: var(--bg-white);
+    cursor: pointer;
+    color: var(--red-400);
+}
+.btn-danger-small:hover { background: var(--red-50); }
+
 /* ========== 印刷 ========== */
 @media print {
     .sidebar, .top-header, .filter-section, .refresh-btn { display: none !important; }

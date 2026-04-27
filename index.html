@@ -279,6 +279,29 @@
                         </div>
                         <button class="btn-primary" style="margin-top:12px;" onclick="openMemberForm()">+ メンバー追加</button>
                     </div>
+
+                    <!-- 名前マッピング管理 -->
+                    <div class="settings-section">
+                        <h3>名前マッピング管理</h3>
+                        <p style="color:var(--text-light);margin-bottom:12px;font-size:13px;">スプレッドシートの名前・メールアドレスとDB正規名の対応を管理します</p>
+                        <div style="display:flex;gap:8px;margin-bottom:12px;">
+                            <input type="text" id="mappingSearchInput" placeholder="検索..." style="flex:1;padding:8px 12px;border:1px solid var(--border-color);border-radius:6px;font-size:13px;" oninput="filterMappingsTable()">
+                            <button class="btn-primary" onclick="openMappingForm()">+ 追加</button>
+                            <button class="btn-secondary" onclick="migrateGASMappings()" style="font-size:12px;">GASデータ移行</button>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table" id="mappingTable">
+                                <thead>
+                                    <tr>
+                                        <th>スプレッドシート名/メール</th>
+                                        <th>DB正規名</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="mappingTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="footer">&copy; DigiMan Inc.</div>
@@ -459,6 +482,32 @@
                 <div class="form-actions">
                     <button type="button" class="btn-secondary" onclick="closeFeedbackModal()">キャンセル</button>
                     <button type="submit" class="btn-primary" id="feedbackSubmitBtn">送信</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 名前マッピングフォームモーダル -->
+    <div class="modal-overlay hidden" id="mappingFormModal">
+        <div class="modal-content" style="max-width:480px;">
+            <div class="modal-header">
+                <h3 id="mappingFormTitle">名前マッピング追加</h3>
+                <button class="modal-close" onclick="closeMappingForm()">&times;</button>
+            </div>
+            <form onsubmit="event.preventDefault();submitMappingForm();">
+                <div class="form-grid">
+                    <div class="form-field full-width">
+                        <label>スプレッドシート名/メール *</label>
+                        <input type="text" id="mappingFormRawName" required placeholder="例: y.murakami@digi-man.com">
+                    </div>
+                    <div class="form-field full-width">
+                        <label>DB正規名 *</label>
+                        <select id="mappingFormCanonical" required></select>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeMappingForm()">キャンセル</button>
+                    <button type="submit" class="btn-primary">保存</button>
                 </div>
             </form>
         </div>

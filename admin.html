@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理画面 | DigiMan 成果報酬DB</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="admin.css">
+    <script src="config.js"></script>
+</head>
+<body>
+    <!-- ヘッダー -->
+    <header class="top-header">
+        <div class="logo">
+            <span class="logo-text">DigiMan</span>
+            <span style="font-size:0.85rem;color:var(--text-light);margin-left:4px;">管理画面</span>
+        </div>
+        <div class="header-right">
+            <a href="index.html" class="btn-secondary" style="text-decoration:none;display:flex;align-items:center;gap:6px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                </svg>
+                ダッシュボードへ戻る
+            </a>
+        </div>
+    </header>
+
+    <div class="admin-layout">
+        <!-- サイドバー -->
+        <aside class="admin-sidebar">
+            <nav class="admin-sidebar-nav">
+                <button class="sidebar-item active" data-section="projects" onclick="switchAdminSection('projects')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/>
+                    </svg>
+                    <span class="sidebar-item-text">案件管理</span>
+                </button>
+                <button class="sidebar-item" data-section="members" onclick="switchAdminSection('members')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+                    </svg>
+                    <span class="sidebar-item-text">人員管理</span>
+                </button>
+                <button class="sidebar-item" data-section="assignments" onclick="switchAdminSection('assignments')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
+                    </svg>
+                    <span class="sidebar-item-text">アサイン管理</span>
+                </button>
+                <button class="sidebar-item" data-section="mappings" onclick="switchAdminSection('mappings')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/><line x1="12" y1="2" x2="12" y2="22"/>
+                    </svg>
+                    <span class="sidebar-item-text">名前マッピング</span>
+                </button>
+            </nav>
+        </aside>
+
+        <!-- メインコンテンツ -->
+        <main class="admin-main">
+
+            <!-- 案件管理セクション -->
+            <section class="admin-section active" id="section-projects">
+                <div class="section-header">
+                    <h2>案件管理</h2>
+                    <button class="btn-primary" id="addProjectBtn">+ 新規追加</button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="data-table" id="projectsTable">
+                        <thead>
+                            <tr>
+                                <th>案件名</th>
+                                <th>顧客名</th>
+                                <th class="text-right">アポ単価</th>
+                                <th class="text-right">月次キャップ数</th>
+                                <th>ステータス</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="projectsTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 人員管理セクション -->
+            <section class="admin-section" id="section-members">
+                <div class="section-header">
+                    <h2>メンバー管理</h2>
+                    <button class="btn-primary" id="addMemberBtn">+ 新規追加</button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="data-table" id="membersTable">
+                        <thead>
+                            <tr>
+                                <th>メンバー名</th>
+                                <th>表示名</th>
+                                <th>チーム</th>
+                                <th>ステータス</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="membersTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- アサイン管理セクション -->
+            <section class="admin-section" id="section-assignments">
+                <div class="section-header">
+                    <h2>アサイン管理</h2>
+                    <div class="section-header-actions">
+                        <input type="month" class="filter-date" id="assignmentMonth">
+                        <button class="btn-primary" id="addAssignmentBtn">+ 新規追加</button>
+                        <button class="btn-secondary" id="copyNextMonthBtn">次月コピー</button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="data-table" id="assignmentsTable">
+                        <thead>
+                            <tr>
+                                <th>案件名</th>
+                                <th>メンバー</th>
+                                <th>ランク</th>
+                                <th>PM</th>
+                                <th class="text-right">キャップ数</th>
+                                <th class="text-right">キャップ金額</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="assignmentsTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 名前マッピングセクション -->
+            <section class="admin-section" id="section-mappings">
+                <div class="section-header">
+                    <h2>名前マッピング管理</h2>
+                    <div class="section-header-actions">
+                        <input type="text" class="search-input" id="mappingSearch" placeholder="名前で検索...">
+                        <button class="btn-primary" id="addMappingBtn">+ 新規追加</button>
+                        <button class="btn-secondary" id="gasMigrationBtn">GASデータ移行</button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="data-table" id="mappingsTable">
+                        <thead>
+                            <tr>
+                                <th>元の名前 (raw_name)</th>
+                                <th>正規名 (canonical_name)</th>
+                                <th>作成日</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mappingsTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- 案件モーダル -->
+    <div class="modal-overlay hidden" id="projectModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="projectModalTitle">案件追加</h3>
+                <button class="modal-close" onclick="document.getElementById('projectModal').classList.add('hidden')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="projectForm">
+                    <input type="hidden" id="projectFormId">
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label>案件名 *</label>
+                            <input type="text" id="projectFormName" required>
+                        </div>
+                        <div class="form-field">
+                            <label>顧客名</label>
+                            <input type="text" id="projectFormClient">
+                        </div>
+                        <div class="form-field">
+                            <label>アポ単価</label>
+                            <input type="number" id="projectFormUnitPrice" min="0">
+                        </div>
+                        <div class="form-field">
+                            <label>月次キャップ数</label>
+                            <input type="number" id="projectFormCapCount" min="0">
+                        </div>
+                        <div class="form-field">
+                            <label>月次キャップ金額</label>
+                            <input type="number" id="projectFormCapAmount" min="0">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="document.getElementById('projectModal').classList.add('hidden')">キャンセル</button>
+                <button class="btn-primary" id="projectFormSubmit">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- メンバーモーダル -->
+    <div class="modal-overlay hidden" id="memberModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="memberModalTitle">メンバー追加</h3>
+                <button class="modal-close" onclick="document.getElementById('memberModal').classList.add('hidden')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="memberForm">
+                    <input type="hidden" id="memberFormId">
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label>メンバー名 *</label>
+                            <input type="text" id="memberFormName" required>
+                        </div>
+                        <div class="form-field">
+                            <label>表示名</label>
+                            <input type="text" id="memberFormDisplayName" placeholder="省略時はメンバー名を使用">
+                        </div>
+                        <div class="form-field">
+                            <label>チーム *</label>
+                            <select id="memberFormTeam" required>
+                                <option value="">選択してください</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label>ステータス</label>
+                            <select id="memberFormStatus">
+                                <option value="active">active</option>
+                                <option value="inactive">inactive</option>
+                            </select>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="document.getElementById('memberModal').classList.add('hidden')">キャンセル</button>
+                <button class="btn-primary" id="memberFormSubmit">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- アサインモーダル -->
+    <div class="modal-overlay hidden" id="assignmentModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="assignmentModalTitle">アサイン追加</h3>
+                <button class="modal-close" onclick="document.getElementById('assignmentModal').classList.add('hidden')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="assignmentForm">
+                    <input type="hidden" id="assignmentFormId">
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label>案件 *</label>
+                            <select id="assignmentFormProject" required>
+                                <option value="">選択してください</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label>メンバー *</label>
+                            <select id="assignmentFormMember" required>
+                                <option value="">選択してください</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label>ランク</label>
+                            <input type="text" id="assignmentFormRank" placeholder="A, B, C...">
+                        </div>
+                        <div class="form-field">
+                            <label>タイプ</label>
+                            <select id="assignmentFormType">
+                                <option value="成果報酬">成果報酬</option>
+                                <option value="稼働報酬">稼働報酬</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label>PM名</label>
+                            <input type="text" id="assignmentFormPM">
+                        </div>
+                        <div class="form-field">
+                            <label>キャップ数</label>
+                            <input type="number" id="assignmentFormCapCount" min="0">
+                        </div>
+                        <div class="form-field">
+                            <label>キャップ金額</label>
+                            <input type="number" id="assignmentFormCapAmount" min="0">
+                        </div>
+                        <div class="form-field">
+                            <label>却下込取得目標数</label>
+                            <input type="number" id="assignmentFormTargetCount" min="0">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="document.getElementById('assignmentModal').classList.add('hidden')">キャンセル</button>
+                <button class="btn-primary" id="assignmentFormSubmit">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 名前マッピングモーダル -->
+    <div class="modal-overlay hidden" id="mappingModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="mappingModalTitle">名前マッピング追加</h3>
+                <button class="modal-close" onclick="document.getElementById('mappingModal').classList.add('hidden')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="mappingForm">
+                    <input type="hidden" id="mappingFormId">
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label>元の名前 (raw_name) *</label>
+                            <input type="text" id="mappingFormRawName" required>
+                        </div>
+                        <div class="form-field">
+                            <label>正規名 (canonical_name) *</label>
+                            <select id="mappingFormCanonicalSelect">
+                                <option value="">メンバーから選択...</option>
+                            </select>
+                            <input type="text" id="mappingFormCanonicalText" placeholder="または直接入力" style="margin-top:6px;">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="document.getElementById('mappingModal').classList.add('hidden')">キャンセル</button>
+                <button class="btn-primary" id="mappingFormSubmit">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- トースト通知 -->
+    <div id="toast" class="toast-notification hidden"></div>
+
+    <script src="admin.js"></script>
+</body>
+</html>
