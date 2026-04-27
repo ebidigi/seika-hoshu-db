@@ -14,5 +14,8 @@ node_modules/
 # Claude Code
 .claude/
 
+# Build output
+dist/
+
 # Data files
 *.csv

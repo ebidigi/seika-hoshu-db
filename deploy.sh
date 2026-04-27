@@ -2,23 +2,21 @@
 
 # 成果報酬チーム管理DB - デプロイスクリプト
 # CSS/JSを埋め込んだ単一HTMLファイルを生成
+#
+# 使い方:
+#   bash deploy.sh              → 自動でソースとデスト先を検出
+#   bash deploy.sh /path/to/out → 出力先を指定
 
-SOURCE_DIR="/Users/ebineryota/code/成果報酬DB"
-DEST_FILE="/Users/ebineryota/seika_hoshu_db.html"
+# ソースディレクトリ = このスクリプトがあるディレクトリ
+SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# CSSとJSの内容を読み込み
-CSS_CONTENT=$(cat "$SOURCE_DIR/style.css")
-JS_CONTENT=$(cat "$SOURCE_DIR/app.js")
+# 出力先: 引数があればそれを使う、なければホームディレクトリ
+DEST_DIR="${1:-$HOME}"
+DEST_FILE="$DEST_DIR/seika_hoshu_db.html"
 
-# index.htmlを読み込み、CSSリンクをインライン化、JSスクリプトをインライン化
-sed \
-  -e '/<link rel="stylesheet" href="style.css">/r /dev/stdin' \
-  -e '/<link rel="stylesheet" href="style.css">/d' \
-  -e '/<script src="app.js"><\/script>/r /dev/stdin' \
-  -e '/<script src="app.js"><\/script>/d' \
-  "$SOURCE_DIR/index.html" > /dev/null 2>&1
+echo "ソース: $SOURCE_DIR"
+echo "出力先: $DEST_FILE"
 
-# より確実な方法: Pythonで結合
 python3 - "$SOURCE_DIR" "$DEST_FILE" << 'PYEOF'
 import sys, os
 
@@ -63,7 +61,7 @@ html = html.replace(
 with open(dest_file, 'w') as f:
     f.write(html)
 
-print(f"デプロイ完了: {dest_file}")
+print(f"\nデプロイ完了: {dest_file}")
 print(f"ブラウザで確認: file://{dest_file}")
 
 # === Admin画面のビルド ===
