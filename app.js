@@ -69,6 +69,83 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAllData();
 });
 
+// ==================== カスタムセレクト ====================
+function initCustomSelects() {
+    document.querySelectorAll('select:not(.custom-initialized)').forEach(sel => {
+        // モーダル内のselectは除外（フォーム操作が複雑になるため）
+        if (sel.closest('.modal-content')) return;
+        // すでにカスタム化済みなら除外
+        if (sel.classList.contains('custom-initialized')) return;
+
+        sel.classList.add('custom-initialized');
+        sel.style.display = 'none';
+
+        const wrap = document.createElement('div');
+        wrap.className = 'custom-select-wrap';
+
+        const trigger = document.createElement('div');
+        trigger.className = 'custom-select-trigger';
+        trigger.textContent = sel.options[sel.selectedIndex]?.text || '';
+
+        const optionsDiv = document.createElement('div');
+        optionsDiv.className = 'custom-select-options';
+
+        // 10個以上なら検索付き
+        if (sel.options.length > 10) {
+            const search = document.createElement('input');
+            search.type = 'text';
+            search.className = 'custom-select-search';
+            search.placeholder = '検索...';
+            search.addEventListener('input', () => {
+                const q = search.value.toLowerCase();
+                optionsDiv.querySelectorAll('.custom-select-option').forEach(opt => {
+                    opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none';
+                });
+            });
+            search.addEventListener('click', e => e.stopPropagation());
+            optionsDiv.appendChild(search);
+        }
+
+        Array.from(sel.options).forEach((opt, i) => {
+            const div = document.createElement('div');
+            div.className = 'custom-select-option' + (i === sel.selectedIndex ? ' selected' : '');
+            div.textContent = opt.text;
+            div.dataset.value = opt.value;
+            div.addEventListener('click', (e) => {
+                e.stopPropagation();
+                sel.value = opt.value;
+                sel.dispatchEvent(new Event('change'));
+                trigger.textContent = opt.text;
+                optionsDiv.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
+                div.classList.add('selected');
+                wrap.classList.remove('open');
+            });
+            optionsDiv.appendChild(div);
+        });
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // 他のカスタムセレクトを閉じる
+            document.querySelectorAll('.custom-select-wrap.open').forEach(w => {
+                if (w !== wrap) w.classList.remove('open');
+            });
+            wrap.classList.toggle('open');
+            // 検索にフォーカス
+            const searchInput = optionsDiv.querySelector('.custom-select-search');
+            if (searchInput) setTimeout(() => searchInput.focus(), 50);
+        });
+
+        wrap.appendChild(trigger);
+        wrap.appendChild(optionsDiv);
+        sel.parentNode.insertBefore(wrap, sel.nextSibling);
+    });
+}
+
+// どこかクリックしたら閉じる
+document.addEventListener('click', () => {
+    document.querySelectorAll('.custom-select-wrap.open').forEach(w => w.classList.remove('open'));
+});
+
 // ==================== Turso API ====================
 async function queryTurso(sql, args = []) {
     const payload = {
@@ -432,6 +509,8 @@ async function loadAllData() {
         loadMappings();
 
         document.getElementById('lastUpdated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+
+        initCustomSelects();
     } catch (error) {
         console.error('Data load error:', error);
         showError('データの読み込みに失敗しました: ' + error.message);
@@ -1942,6 +2021,8 @@ async function applyAnalysisFilter() {
     renderHeatmap();
     renderCancelTrend();
     renderScatter();
+
+    initCustomSelects();
 }
 
 async function fetchPerfRange(start, end) {
