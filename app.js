@@ -2801,7 +2801,7 @@ function renderAppointments() {
                         ${a.status === '未確認' ? `
                             <button class="status-btn btn-execute" onclick="updateAppoStatus('${a.id}','実施')">実施</button>
                             <button class="status-btn btn-reschedule" onclick="updateAppoStatus('${a.id}','リスケ')">リスケ</button>
-                            <button class="status-btn btn-cancel" onclick="updateAppoStatus('${a.id}','キャンセル')">取消</button>
+                            <button class="status-btn btn-cancel" onclick="updateAppoStatus('${a.id}','キャンセル')">キャンセル</button>
                         ` : `
                             <button class="status-btn" onclick="updateAppoStatus('${a.id}','未確認')">戻す</button>
                         `}
