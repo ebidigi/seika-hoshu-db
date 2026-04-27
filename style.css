@@ -2515,6 +2515,12 @@ th.sortable:hover { background: var(--gray-200); }
 }
 .btn-danger-small:hover { background: var(--red-50); }
 
+/* ========== 実行達成率プログレスバー ========== */
+.mgmt-progress-wrap { margin-top: 8px; }
+.mgmt-progress-bar { height: 8px; background: var(--gray-200); border-radius: 4px; overflow: hidden; }
+.mgmt-progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+.mgmt-progress-label { font-size: 12px; color: var(--text-light); margin-top: 4px; text-align: center; }
+
 /* ========== 印刷 ========== */
 @media print {
     .sidebar, .top-header, .filter-section, .refresh-btn { display: none !important; }

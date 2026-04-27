@@ -334,7 +334,8 @@ function computeTeamStats(teamName, ym) {
     const execUnconfirmedAmount = execAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
     const execCancelledAmount = execAppo.filter(a => a.status === 'キャンセル').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
     const execRescheduleAmount = execAppo.filter(a => a.status === 'リスケ').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-    const execForecast = execAmount + execUnconfirmedAmount;
+    // 着地ヨミ = 実施確定 + 未確認 × (1 - キャンセル率)
+    const execForecast = execAmount + Math.round(execUnconfirmedAmount * (1 - 0.15));
 
     const teamTarget = getTarget('team', teamName, ym);
     const appoTarget = teamTarget ? (parseFloat(teamTarget.appointment_amount_target) || 0) : 0;
@@ -1202,6 +1203,7 @@ function renderManagement(filter) {
     const totalTarget = getTarget('total', 'all', ym);
     const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
     const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
+    // キャンセル率デフォルト 15%（着地ヨミ計算用）
     const RESKED_CANCEL_RATE = 0.15;
 
     const excluded = getExcludedMembers(ym);
@@ -1231,7 +1233,7 @@ function renderManagement(filter) {
     const currentMonthExecAmt = allExecAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
     const prevMonthExecAmt = allExecAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
 
-    // 着地ヨミ
+    // 着地ヨミ = 実施確定 + 未確認 × (1 - キャンセル率)
     const execForecast = execConfirmed + Math.round(execUnconfirmed * (1 - RESKED_CANCEL_RATE));
     const forecastDiff = execForecast - executionTarget;
     const forecastColor = forecastDiff >= 0 ? '#86aaec' : '#ef947a';
@@ -1362,6 +1364,9 @@ function renderManagement(filter) {
         <td></td><td></td><td></td>
     </tr></tfoot></table></div>`;
 
+    // 取消率チャート高さ
+    const cancelChartHeight = Math.max(200, capData.filter(c => c.cancelCount > 0).length * 36 + 40);
+
     // 期間ラベル
     const periodLabels = { day: '日別', week: '週別', month: '月別', quarter: 'Q別' };
 
@@ -1387,6 +1392,12 @@ function renderManagement(filter) {
             <div class="mgmt-gauge-title">実施確定金額</div>
             <div class="mgmt-gauge-wrap"><canvas id="mgmtGaugeExec"></canvas></div>
             <div class="mgmt-gauge-footer">目標 ¥${executionTarget.toLocaleString()}</div>
+            <div class="mgmt-progress-wrap">
+                <div class="mgmt-progress-bar">
+                    <div class="mgmt-progress-fill" style="width:${Math.min(execRate, 100)}%;background:${execRate < 50 ? 'var(--red-400)' : execRate < 80 ? 'var(--yellow-300)' : 'var(--blue-200)'}"></div>
+                </div>
+                <div class="mgmt-progress-label">実行達成率 ${execRate}%</div>
+            </div>
         </div>
         <div class="mgmt-gauge-card mgmt-yomi-card">
             <div class="mgmt-gauge-title">着地ヨミ<span style="font-size:0.7rem;color:var(--text-light);margin-left:6px;">85%換算</span></div>
@@ -1477,6 +1488,11 @@ function renderManagement(filter) {
     ${projTableHtml}`;
 
     document.getElementById('mgmtSalesProgress').innerHTML = html;
+
+    // 案件別キャンセル率チャートは別コンテナに出力
+    document.getElementById('mgmtCancelRateChart').innerHTML =
+        '<div class="section-title" style="margin-top:28px;">案件別 キャンセル率</div>' +
+        '<div class="mgmt-chart-container" style="height:' + cancelChartHeight + 'px;"><canvas id="mgmtBarCancelRate"></canvas></div>';
     document.getElementById('mgmtExecForecast').innerHTML = '';
     document.getElementById('mgmtCapProgress').innerHTML = '';
     document.getElementById('mgmtAssignmentAssess').innerHTML = '';
@@ -1744,6 +1760,38 @@ function renderManagement(filter) {
     createYieldHBar('mgmtHBarCallToAppo', yieldData, 'callToAppo', '#86aaec');
     createYieldHBar('mgmtHBarCallToPr', yieldData, 'callToPr', '#b8d4f0');
     createYieldHBar('mgmtHBarPrToAppo', yieldData, 'prToAppo', '#90b8f8');
+
+    // 案件別キャンセル率バーチャート（キャンセル件数0の案件は除外）
+    const cancelRateData = capData.filter(c => c.cancelCount > 0).sort((a, b) => b.cancelRate - a.cancelRate);
+    const cancelBarCtx = document.getElementById('mgmtBarCancelRate');
+    if (cancelBarCtx && cancelRateData.length > 0) {
+        mgmtCharts['mgmtBarCancelRate'] = new Chart(cancelBarCtx, {
+            type: 'bar',
+            data: {
+                labels: cancelRateData.map(c => c.name),
+                datasets: [{
+                    data: cancelRateData.map(c => c.cancelRate),
+                    backgroundColor: cancelRateData.map(c => c.cancelRate >= 30 ? 'var(--red-400)' : 'var(--blue-200)'),
+                    borderRadius: 4,
+                    barPercentage: 0.7,
+                    categoryPercentage: 0.85
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { beginAtZero: true, max: Math.max(100, ...cancelRateData.map(c => c.cancelRate)), ticks: { callback: v => v + '%', font: { size: 10 } }, grid: { color: '#f5f5f5' } },
+                    y: { ticks: { font: { size: 11, family: '"Noto Sans JP"', weight: '600' } }, grid: { display: false } }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (ctx) => ctx.parsed.x + '% (' + cancelRateData[ctx.dataIndex].cancelCount + '件)' } }
+                }
+            }
+        });
+    }
 }
 
 // ==================== Tab: 詳細分析サブナビ ====================
@@ -1778,6 +1826,7 @@ const ANL_METRICS = [
     { key: 'callToPr', label: '架→着電率', fmt: v => v.toFixed(1) + '%', unit: '%', isRate: true },
     { key: 'prToAppo', label: '着電→アポ率', fmt: v => v.toFixed(1) + '%', unit: '%', isRate: true },
     { key: 'callToAppo', label: '架→アポ率', fmt: v => v.toFixed(1) + '%', unit: '%', isRate: true },
+    { key: 'cancelRate', label: 'キャンセル率', fmt: v => v.toFixed(1) + '%', unit: '%', isRate: true },
 ];
 
 function calcMemberStats(data, memberName, proj) {
@@ -1796,6 +1845,11 @@ function calcMemberStats(data, memberName, proj) {
     let execAppo = executionAppoData.filter(a => a.member_name === memberName && a.status === '実施');
     if (proj && proj !== 'all') execAppo = execAppo.filter(a => a.project_name === proj);
     const execConfirmed = execAppo.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    // キャンセル率（アポ件数に対するキャンセル件数の割合）
+    let memberAllAppo = appointmentsData.filter(a => a.member_name === memberName);
+    if (proj && proj !== 'all') memberAllAppo = memberAllAppo.filter(a => a.project_name === proj);
+    const cancelCount = memberAllAppo.filter(a => a.status === 'キャンセル').length;
+    const cancelRate = memberAllAppo.length > 0 ? cancelCount / memberAllAppo.length * 100 : 0;
     return {
         calls, pr, appo, amount, execConfirmed, hours, days,
         dailyCalls: days > 0 ? Math.round(calls / days) : 0,
@@ -1803,6 +1857,7 @@ function calcMemberStats(data, memberName, proj) {
         callToPr: calls > 0 ? pr / calls * 100 : 0,
         prToAppo: pr > 0 ? appo / pr * 100 : 0,
         callToAppo: calls > 0 ? appo / calls * 100 : 0,
+        cancelRate,
     };
 }
 
@@ -2015,7 +2070,10 @@ function renderHeatmap() {
         html += `<tr><td style="font-weight:600;white-space:nowrap;">${escapeHtml(s.name)}</td>`;
         ANL_METRICS.forEach(m => {
             const v = s[m.key];
-            html += `<td class="text-right" style="background:${heatColor(m.key, v)};font-size:0.75rem;font-weight:600;">${m.fmt(v)}</td>`;
+            // キャンセル率 30%以上は赤背景
+            const bg = (m.key === 'cancelRate' && v >= 30) ? 'var(--red-50)' : heatColor(m.key, v);
+            const textColor = (m.key === 'cancelRate' && v >= 30) ? 'var(--red-400)' : '';
+            html += `<td class="text-right" style="background:${bg};font-size:0.75rem;font-weight:600;${textColor ? 'color:' + textColor + ';' : ''}">${m.fmt(v)}</td>`;
         });
         html += `</tr>`;
     });
@@ -2344,10 +2402,12 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
         // 取得金額（当月取得アポ）
         const acqAmount = teamAppo.reduce((s, a) => s + (a.amount || 0), 0);
 
-        // 実施見込（キャンセル・リスケ除く）
-        const execForecast = teamExec.filter(a => a.status !== 'キャンセル' && a.status !== 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
+        // 着地ヨミ = 実施確定 + 未確認 × (1 - キャンセル率)
+        const teamExecConfirmedAmt = teamExec.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
+        const teamExecUnconfirmedAmt = teamExec.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
+        const execForecast = teamExecConfirmedAmt + Math.round(teamExecUnconfirmedAmt * (1 - 0.15));
         // 実施確定（ステータス=実施のみ）
-        const execConfirmed = teamExec.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
+        const execConfirmed = teamExecConfirmedAmt;
 
         const teamTarget = getTarget('team', teamName, ym);
         const target = teamTarget ? teamTarget.appointment_amount_target : 0;
@@ -2391,7 +2451,7 @@ function renderTeamCards(perfData, appoData, execAppoData, standardProgress) {
                 <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border-color);">
                     <span style="font-size:0.75rem;color:var(--text-light);">実施見込</span>
                     <span style="font-size:0.8rem;font-weight:600;font-family:'Poppins',sans-serif;">¥${execForecast.toLocaleString()}</span>
-                    <span style="font-size:0.75rem;color:var(--text-light);">（未確認+実施）</span>
+                    <span style="font-size:0.75rem;color:var(--text-light);">（確定+未確認×85%）</span>
                 </div>
             </div>
         `;
@@ -2412,8 +2472,11 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
         const avgUnitPrice = memberAppo.length > 0 ? Math.round(acqAmount / memberAppo.length) : 0;
 
         const memberExec = execAppoData.filter(d => d.member_name === member.member_name);
-        const execForecast = memberExec.filter(a => a.status !== 'キャンセル' && a.status !== 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
-        const execConfirmed = memberExec.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
+        // 着地ヨミ = 実施確定 + 未確認 × (1 - キャンセル率)
+        const memberExecConfirmedAmt = memberExec.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
+        const memberExecUnconfirmedAmt = memberExec.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
+        const execForecast = memberExecConfirmedAmt + Math.round(memberExecUnconfirmedAmt * (1 - 0.15));
+        const execConfirmed = memberExecConfirmedAmt;
 
         const memberTarget = getTarget('member', member.member_name, ym);
         const acqTarget = memberTarget ? memberTarget.appointment_amount_target : 0;
@@ -2461,7 +2524,7 @@ function renderMemberSalesCards(appoData, execAppoData, standardProgress) {
                 <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border-color);">
                     <span style="font-size:0.75rem;color:var(--text-light);">実施見込</span>
                     <span style="font-size:0.8rem;font-weight:600;font-family:'Poppins',sans-serif;">¥${execForecast.toLocaleString()}</span>
-                    <span style="font-size:0.75rem;color:var(--text-light);">（未確認+実施）</span>
+                    <span style="font-size:0.75rem;color:var(--text-light);">（確定+未確認×85%）</span>
                 </div>
             </div>
         `;
