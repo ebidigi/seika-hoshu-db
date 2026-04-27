@@ -1908,6 +1908,10 @@ function renderAnalysisNew(filter) {
     <div class="section-title" style="margin-top:24px;">全員 × 指標 ヒートマップ</div>
     <div style="overflow-x:auto;" id="anlHeatmapWrap"></div>
 
+    <!-- 月別キャンセル率推移 -->
+    <div class="section-title" style="margin-top:24px;">月別 個人キャンセル率推移</div>
+    <div class="mgmt-chart-container" style="height:300px;"><canvas id="anlCancelTrendChart"></canvas></div>
+
     <!-- 下段: 散布図 -->
     <div class="section-title" style="margin-top:24px;">散布図
         <div style="display:inline-flex;gap:8px;margin-left:12px;font-size:0.8rem;">
@@ -1936,6 +1940,7 @@ async function applyAnalysisFilter() {
 
     renderScorecard();
     renderHeatmap();
+    renderCancelTrend();
     renderScatter();
 }
 
@@ -2079,6 +2084,67 @@ function renderHeatmap() {
     });
     html += `</tbody></table>`;
     document.getElementById('anlHeatmapWrap').innerHTML = html;
+}
+
+// 月別キャンセル率推移チャート
+function renderCancelTrend() {
+    if (analysisCharts['anlCancelTrend']) { analysisCharts['anlCancelTrend'].destroy(); }
+    const ctx = document.getElementById('anlCancelTrendChart');
+    if (!ctx) return;
+
+    const excluded = getExcludedMembers(document.getElementById('filterMonth').value);
+    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
+
+    // 直近6ヶ月のラベルを生成
+    const now = new Date();
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+    }
+
+    // キャンセル件数があるメンバーのみ対象
+    const membersWithCancel = activeMembers.filter(m => {
+        return appointmentsData.some(a => a.member_name === m.member_name && a.status === 'キャンセル');
+    });
+
+    const colors = ['#1155cc', '#e04f24', '#e8d335', '#00a2da', '#86aaec', '#ef947a', '#6dc6e5', '#437ce1', '#ec724e', '#ede07d'];
+
+    const datasets = membersWithCancel.map((m, i) => {
+        const data = months.map(ym => {
+            const monthAppo = appointmentsData.filter(a => a.member_name === m.member_name && a.acquisition_date && a.acquisition_date.startsWith(ym));
+            const cancelCount = monthAppo.filter(a => a.status === 'キャンセル').length;
+            return monthAppo.length > 0 ? Math.round(cancelCount / monthAppo.length * 1000) / 10 : null;
+        });
+        return {
+            label: m.member_name,
+            data: data,
+            borderColor: colors[i % colors.length],
+            backgroundColor: colors[i % colors.length] + '33',
+            tension: 0.3,
+            pointRadius: 4,
+            spanGaps: true,
+        };
+    }).filter(ds => ds.data.some(v => v !== null && v > 0));
+
+    if (datasets.length === 0) return;
+
+    analysisCharts['anlCancelTrend'] = new Chart(ctx, {
+        type: 'line',
+        data: { labels: months, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: 'キャンセル率 (%)' }, ticks: { callback: v => v + '%' } },
+                x: { title: { display: true, text: '月' } }
+            },
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 11 } } },
+                tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y ?? '-') + '%' } }
+            }
+        }
+    });
 }
 
 // 散布図
