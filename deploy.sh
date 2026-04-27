@@ -34,6 +34,20 @@ with open(os.path.join(source_dir, 'style.css'), 'r') as f:
 with open(os.path.join(source_dir, 'app.js'), 'r') as f:
     js = f.read()
 
+config_path = os.path.join(source_dir, 'config.js')
+if os.path.exists(config_path):
+    with open(config_path, 'r') as f:
+        config_js = f.read()
+else:
+    print("WARNING: config.js が見つかりません。TURSO_CONFIG が未定義になります。")
+    config_js = "// config.js not found"
+
+# config.jsをインラインに置換
+html = html.replace(
+    '<script src="config.js"></script>',
+    '<script>\n' + config_js + '\n</script>'
+)
+
 # CSSリンクをインラインスタイルに置換
 html = html.replace(
     '<link rel="stylesheet" href="style.css">',
