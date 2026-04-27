@@ -2369,6 +2369,9 @@ th.sortable:hover { background: var(--gray-200); }
     padding: 20px;
     height: 320px;
     position: relative;
+    max-width: 1200px;
+    margin-left: auto;
+    margin-right: auto;
 }
 .mgmt-hbar-container {
     height: 400px;
@@ -2519,6 +2522,22 @@ select:focus {
     outline: none;
     border-color: var(--primary-blue);
     box-shadow: 0 0 0 3px var(--blue-50);
+}
+/* ドロップダウンのオプションリスト */
+select option {
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    padding: 8px 12px;
+    color: var(--text-dark);
+    background: var(--bg-white);
+}
+select option:checked {
+    background: var(--blue-50);
+    color: var(--primary-blue);
+    font-weight: 500;
+}
+select option:hover {
+    background: var(--gray-100);
 }
 
 /* ========== 小ボタン (マッピング管理等) ========== */
