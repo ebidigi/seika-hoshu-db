@@ -4785,61 +4785,34 @@ function renderDWTargetForm() {
     var lastDay = new Date(year, month, 0).getDate();
     var dayNames = ['日', '月', '火', '水', '木', '金', '土'];
 
-    // === 週別目標 ===
-    var weekTitle = document.createElement('h4');
-    weekTitle.textContent = '週別目標（' + month + '月）';
-    weekTitle.style.cssText = 'margin:0 0 8px;font-size:0.9rem;';
-    container.appendChild(weekTitle);
+    // === カレンダーUI（週別+日別統合） ===
+    var calTitle = document.createElement('h4');
+    calTitle.textContent = '目標設定（' + month + '月）';
+    calTitle.style.cssText = 'margin:0 0 8px;font-size:0.9rem;';
+    container.appendChild(calTitle);
 
     var weeks = getWeeksOfMonth(year, month);
-    var weekGrid = document.createElement('div');
-    weekGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px;';
 
-    weeks.forEach(function(w) {
-        var existing = weeklyTargetsData.find(function(t) {
-            return t.member_name === memberName && t.year_month === ym && parseInt(t.week_number) === w.num;
-        });
-        var val = existing ? (parseInt(existing.amount_target) || 0) : 0;
-
-        var row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:8px;';
-
-        var label = document.createElement('span');
-        label.style.cssText = 'font-size:0.8rem;min-width:120px;';
-        label.textContent = '第' + w.num + '週(' + (month) + '/' + w.startDay + '-' + (month) + '/' + w.endDay + ')';
-
-        var input = document.createElement('input');
-        input.type = 'number';
-        input.min = '0';
-        input.value = val;
-        input.id = 'dwWeek_' + w.num;
-        input.style.cssText = 'width:120px;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:0.85rem;';
-
-        row.appendChild(label);
-        row.appendChild(input);
-        weekGrid.appendChild(row);
-    });
-    container.appendChild(weekGrid);
-
-    // === 日別目標（カレンダーUI） ===
-    var dayTitle = document.createElement('h4');
-    dayTitle.textContent = '日別目標（' + month + '月）';
-    dayTitle.style.cssText = 'margin:0 0 8px;font-size:0.9rem;';
-    container.appendChild(dayTitle);
-
-    var calS = 'max-width:600px;border:1px solid #e2e5ea;border-radius:8px;overflow:hidden;';
-    var headerS = 'display:grid;grid-template-columns:repeat(5,1fr);background:#e7eefb;';
+    var calS = 'max-width:720px;border:1px solid #e2e5ea;border-radius:8px;overflow:hidden;';
+    var headerS = 'display:grid;grid-template-columns:100px repeat(5,1fr);background:#e7eefb;';
     var dayLabelS = 'text-align:center;padding:8px 0;font-weight:600;font-size:0.8rem;color:#1155cc;';
-    var rowS = 'display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid #e2e5ea;';
+    var weekLabelS = 'text-align:center;padding:8px 0;font-weight:600;font-size:0.75rem;color:#666;';
+    var rowS = 'display:grid;grid-template-columns:100px repeat(5,1fr);border-top:1px solid #e2e5ea;';
     var cellS = 'padding:6px;min-height:64px;border-right:1px solid #e4e8ef;display:flex;flex-direction:column;gap:4px;';
+    var weekCellS = 'padding:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:#f8f9fb;border-right:1px solid #e4e8ef;';
     var inputS = 'width:100%;padding:4px 6px;border:1px solid #e2e5ea;border-radius:4px;font-size:0.8rem;text-align:right;background:#fff;';
+    var weekInputS = 'width:80px;padding:4px 6px;border:1px solid #c2d6f9;border-radius:4px;font-size:0.8rem;text-align:right;background:#fff;font-weight:600;';
 
     var cal = document.createElement('div');
     cal.style.cssText = calS;
 
-    // 曜日ヘッダー
+    // 曜日ヘッダー（週列 + 月~金）
     var headerRow = document.createElement('div');
     headerRow.style.cssText = headerS;
+    var weekHeader = document.createElement('div');
+    weekHeader.style.cssText = weekLabelS;
+    weekHeader.textContent = '週目標';
+    headerRow.appendChild(weekHeader);
     ['月', '火', '水', '木', '金'].forEach(function(d) {
         var cell = document.createElement('div');
         cell.style.cssText = dayLabelS;
@@ -4848,12 +4821,43 @@ function renderDWTargetForm() {
     });
     cal.appendChild(headerRow);
 
-    // 月初の曜日を取得（月曜=0始まり）
+    // 月初の曜日を取得
     var firstDow = new Date(year, month - 1, 1).getDay();
     var mondayOffset = firstDow === 0 ? 6 : firstDow - 1;
 
+    var weekIdx = 0;
     var row = document.createElement('div');
     row.style.cssText = rowS;
+
+    // 週セル追加
+    function addWeekCell(r) {
+        var w = weeks[weekIdx] || null;
+        var wCell = document.createElement('div');
+        wCell.style.cssText = weekCellS;
+        if (w) {
+            var wLabel = document.createElement('div');
+            wLabel.style.cssText = 'font-size:0.7rem;color:#666;font-weight:600;';
+            wLabel.textContent = '第' + w.num + '週';
+            wCell.appendChild(wLabel);
+
+            var existing = weeklyTargetsData.find(function(t) {
+                return t.member_name === memberName && t.year_month === ym && parseInt(t.week_number) === w.num;
+            });
+            var val = existing ? (parseInt(existing.amount_target) || 0) : 0;
+            var wInput = document.createElement('input');
+            wInput.type = 'number';
+            wInput.min = '0';
+            wInput.value = val || '';
+            wInput.placeholder = '¥';
+            wInput.id = 'dwWeek_' + w.num;
+            wInput.style.cssText = weekInputS;
+            wCell.appendChild(wInput);
+        }
+        r.appendChild(wCell);
+        weekIdx++;
+    }
+
+    addWeekCell(row);
 
     // 月初の空セル
     for (var e = 0; e < mondayOffset; e++) {
@@ -4872,6 +4876,7 @@ function renderDWTargetForm() {
                 cal.appendChild(row);
                 row = document.createElement('div');
                 row.style.cssText = rowS;
+                addWeekCell(row);
                 cellCount = 0;
             }
             continue;
@@ -4918,6 +4923,7 @@ function renderDWTargetForm() {
             cal.appendChild(row);
             row = document.createElement('div');
             row.style.cssText = rowS;
+            addWeekCell(row);
             cellCount = 0;
         }
     }
