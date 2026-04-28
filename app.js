@@ -4821,45 +4821,111 @@ function renderDWTargetForm() {
     });
     container.appendChild(weekGrid);
 
-    // === 日別目標 ===
+    // === 日別目標（カレンダーUI） ===
     var dayTitle = document.createElement('h4');
     dayTitle.textContent = '日別目標（' + month + '月）';
     dayTitle.style.cssText = 'margin:0 0 8px;font-size:0.9rem;';
     container.appendChild(dayTitle);
 
-    var dayGrid = document.createElement('div');
-    dayGrid.style.cssText = 'display:grid;grid-template-columns:repeat(5, 1fr);gap:6px;';
+    var calS = 'max-width:600px;border:1px solid #e2e5ea;border-radius:8px;overflow:hidden;';
+    var headerS = 'display:grid;grid-template-columns:repeat(5,1fr);background:#e7eefb;';
+    var dayLabelS = 'text-align:center;padding:8px 0;font-weight:600;font-size:0.8rem;color:#1155cc;';
+    var rowS = 'display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid #e2e5ea;';
+    var cellS = 'padding:6px;min-height:64px;border-right:1px solid #e4e8ef;display:flex;flex-direction:column;gap:4px;';
+    var inputS = 'width:100%;padding:4px 6px;border:1px solid #e2e5ea;border-radius:4px;font-size:0.8rem;text-align:right;background:#fff;';
 
+    var cal = document.createElement('div');
+    cal.style.cssText = calS;
+
+    // 曜日ヘッダー
+    var headerRow = document.createElement('div');
+    headerRow.style.cssText = headerS;
+    ['月', '火', '水', '木', '金'].forEach(function(d) {
+        var cell = document.createElement('div');
+        cell.style.cssText = dayLabelS;
+        cell.textContent = d;
+        headerRow.appendChild(cell);
+    });
+    cal.appendChild(headerRow);
+
+    // 月初の曜日を取得（月曜=0始まり）
+    var firstDow = new Date(year, month - 1, 1).getDay();
+    var mondayOffset = firstDow === 0 ? 6 : firstDow - 1;
+
+    var row = document.createElement('div');
+    row.style.cssText = rowS;
+
+    // 月初の空セル
+    for (var e = 0; e < mondayOffset; e++) {
+        var empty = document.createElement('div');
+        empty.style.cssText = cellS + 'background:#f1f3f5;';
+        row.appendChild(empty);
+    }
+
+    var cellCount = mondayOffset;
     for (var d = 1; d <= lastDay; d++) {
         var dt = new Date(year, month - 1, d);
-        if (dt.getDay() === 0 || dt.getDay() === 6) continue;
+        var dow = dt.getDay();
+
+        if (dow === 0 || dow === 6) {
+            if (dow === 0 && cellCount > 0) {
+                cal.appendChild(row);
+                row = document.createElement('div');
+                row.style.cssText = rowS;
+                cellCount = 0;
+            }
+            continue;
+        }
+
         var ds = ym + '-' + String(d).padStart(2, '0');
-        if (holidaysSet.has(ds)) continue;
+        var isHoliday = holidaysSet.has(ds);
+        var isToday = ds === fmtDateYMD(new Date());
 
         var existing = dailyTargetsData.find(function(t) {
             return t.member_name === memberName && t.target_date === ds;
         });
         var val = existing ? (parseInt(existing.appointment_amount_target) || 0) : 0;
 
-        var row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:4px;';
+        var cell = document.createElement('div');
+        var extra = isHoliday ? 'background:#fff8f0;' : isToday ? 'background:#eef4ff;box-shadow:inset 0 0 0 2px #1155cc;' : '';
+        cell.style.cssText = cellS + extra;
 
-        var label = document.createElement('span');
-        label.style.cssText = 'font-size:0.75rem;min-width:48px;color:var(--text-light);';
-        label.textContent = d + '日(' + dayNames[dt.getDay()] + ')';
+        var dayLabel = document.createElement('div');
+        dayLabel.style.cssText = 'font-size:0.75rem;font-weight:600;color:#333;';
+        dayLabel.textContent = d;
+        cell.appendChild(dayLabel);
 
-        var input = document.createElement('input');
-        input.type = 'number';
-        input.min = '0';
-        input.value = val;
-        input.id = 'dwDay_' + ds;
-        input.style.cssText = 'width:90px;padding:4px 6px;border:1px solid var(--border-color);border-radius:4px;font-size:0.8rem;';
+        if (!isHoliday) {
+            var input = document.createElement('input');
+            input.type = 'number';
+            input.min = '0';
+            input.value = val || '';
+            input.placeholder = '¥';
+            input.id = 'dwDay_' + ds;
+            input.style.cssText = inputS;
+            cell.appendChild(input);
+        } else {
+            var hLabel = document.createElement('div');
+            hLabel.style.cssText = 'font-size:0.7rem;color:#e04f24;';
+            hLabel.textContent = '祝';
+            cell.appendChild(hLabel);
+        }
 
-        row.appendChild(label);
-        row.appendChild(input);
-        dayGrid.appendChild(row);
+        row.appendChild(cell);
+        cellCount++;
+
+        if (dow === 5) {
+            cal.appendChild(row);
+            row = document.createElement('div');
+            row.style.cssText = rowS;
+            cellCount = 0;
+        }
     }
-    container.appendChild(dayGrid);
+    if (cellCount > 0) {
+        cal.appendChild(row);
+    }
+
+    container.appendChild(cal);
 }
 
 function getWeeksOfMonth(year, month) {
