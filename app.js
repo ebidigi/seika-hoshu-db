@@ -1098,9 +1098,6 @@ function renderMorning(filter) {
     // 日別目論見金額テーブル
     renderMorningDailyAmount(ym);
 
-    // 散布図
-    renderMorningScatterSection();
-
     // 日次推移グラフ
     renderMorningLineSection(ym);
 }
