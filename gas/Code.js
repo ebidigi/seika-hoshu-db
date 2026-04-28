@@ -22,6 +22,7 @@ function doGet(e) {
       case 'sync':
         syncPerformanceToTursoSeika();
         syncSalesReportToTursoSeika();
+        syncDailyPlansToTurso();
         result = { status: 'ok', message: 'Sync completed' };
         break;
 
@@ -84,6 +85,7 @@ function setupTriggersSeika() {
     const name = trigger.getHandlerFunction();
     if (name === 'syncPerformanceToTursoSeika' ||
         name === 'syncSalesReportToTursoSeika' ||
+        name === 'syncDailyPlansToTurso' ||
         name === 'sendTaaanDailySummary18' ||
         name === 'syncSlackAppoStatusToTurso') {
       ScriptApp.deleteTrigger(trigger);
@@ -98,6 +100,12 @@ function setupTriggersSeika() {
 
   // 売上報告同期: 15分毎
   ScriptApp.newTrigger('syncSalesReportToTursoSeika')
+    .timeBased()
+    .everyMinutes(15)
+    .create();
+
+  // 予定報告同期: 15分毎
+  ScriptApp.newTrigger('syncDailyPlansToTurso')
     .timeBased()
     .everyMinutes(15)
     .create();

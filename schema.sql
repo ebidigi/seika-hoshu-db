@@ -225,6 +225,23 @@ CREATE TABLE IF NOT EXISTS team_monthly_pl (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- 予定報告データ（日別稼働予定）
+CREATE TABLE IF NOT EXISTS daily_plans (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  member_name TEXT NOT NULL,
+  project_name TEXT NOT NULL,
+  planned_date TEXT NOT NULL,
+  planned_calls INTEGER DEFAULT 0,
+  actual_calls INTEGER DEFAULT 0,
+  pr_count INTEGER DEFAULT 0,
+  appointment_count INTEGER DEFAULT 0,
+  appointment_details TEXT,
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(member_name, project_name, planned_date)
+);
+CREATE INDEX IF NOT EXISTS idx_dp_date ON daily_plans(planned_date);
+CREATE INDEX IF NOT EXISTS idx_dp_member ON daily_plans(member_name);
+
 -- フィードバック/改修依頼
 CREATE TABLE IF NOT EXISTS feedback_requests (
   id TEXT PRIMARY KEY,

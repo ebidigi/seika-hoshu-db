@@ -519,6 +519,145 @@ function cleanupNonCanonicalNames() {
   }
 }
 
+// ==================== 予定報告データ同期 ====================
+
+/**
+ * 予定報告シートをTursoのdaily_plansテーブルに同期（15分毎トリガー用）
+ * カラム: A:担当者, B:案件名, C:稼働予定日, D:架電数目, E:架電数, F:PR数, G:アポ数, H:アポ内容
+ */
+function syncDailyPlansToTurso() {
+  if (!isBusinessHoursSeika()) {
+    Logger.log('営業時間外のためスキップ（予定報告）');
+    return;
+  }
+
+  const sheet = SpreadsheetApp.openById(SEIKA_CONFIG.SPREADSHEET_ID)
+    .getSheetByName(SEIKA_CONFIG.PLANS_SHEET);
+
+  if (!sheet) {
+    Logger.log('ERROR: Sheet not found: ' + SEIKA_CONFIG.PLANS_SHEET);
+    return;
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('No data in plans sheet');
+    return;
+  }
+
+  // 同期対象日付範囲（直近7日）
+  const today = new Date();
+  const syncFrom = new Date(today);
+  syncFrom.setDate(syncFrom.getDate() - SEIKA_CONFIG.PLANS_SYNC_DAYS);
+  const syncFromStr = formatDateGAS(syncFrom);
+
+  Logger.log('予定報告 同期対象期間: ' + syncFromStr + ' 〜 今日以降');
+
+  // スプレッドシート全行読み取り（A〜H = 8列）
+  const allData = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+
+  const targetRows = [];
+  for (const row of allData) {
+    const memberRaw = String(row[0] || '').trim();
+    if (!memberRaw) continue;
+
+    const plannedDate = row[2];
+    if (!plannedDate) continue;
+
+    const d = new Date(plannedDate);
+    if (isNaN(d.getTime())) continue;
+
+    const dateStr = formatDateGAS(d);
+    if (dateStr >= syncFromStr) {
+      targetRows.push(row);
+    }
+  }
+
+  Logger.log('予定報告 同期対象行: ' + targetRows.length + '行');
+
+  if (targetRows.length === 0) return;
+
+  let upserted = 0;
+  let errors = 0;
+
+  for (let i = 0; i < targetRows.length; i += SEIKA_CONFIG.BATCH_SIZE) {
+    const batch = targetRows.slice(i, i + SEIKA_CONFIG.BATCH_SIZE);
+    try {
+      const result = upsertDailyPlansBatch(batch);
+      upserted += result.success;
+      errors += result.errors;
+    } catch (e) {
+      Logger.log('Plans batch error at index ' + i + ': ' + e.message);
+      errors += batch.length;
+    }
+  }
+
+  Logger.log('予定報告同期完了: ' + upserted + '件, エラー' + errors + '件');
+}
+
+/**
+ * 予定報告データのバッチUPSERT
+ */
+function upsertDailyPlansBatch(rows) {
+  const requests = [];
+
+  for (const row of rows) {
+    // A:担当者, B:案件名, C:稼働予定日, D:架電数目, E:架電数, F:PR数, G:アポ数, H:アポ内容
+    const memberName = normalizeMemberName(row[0]);
+    const projectName = normalizeProjectName(row[1]);
+    const plannedDate = formatDateGAS(row[2]);
+    const plannedCalls = parseInt(row[3]) || 0;
+    const actualCalls = parseInt(row[4]) || 0;
+    const prCount = parseInt(row[5]) || 0;
+    const appointmentCount = parseInt(row[6]) || 0;
+    const appointmentDetails = String(row[7] || '').trim();
+
+    if (!plannedDate || !memberName) continue;
+
+    requests.push({
+      type: 'execute',
+      stmt: {
+        sql: `INSERT INTO daily_plans (id, member_name, project_name, planned_date, planned_calls, actual_calls, pr_count, appointment_count, appointment_details, updated_at)
+              VALUES (
+                COALESCE(
+                  (SELECT id FROM daily_plans WHERE member_name = ? AND project_name = ? AND planned_date = ?),
+                  lower(hex(randomblob(16)))
+                ),
+                ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
+              )
+              ON CONFLICT(member_name, project_name, planned_date)
+              DO UPDATE SET planned_calls=excluded.planned_calls, actual_calls=excluded.actual_calls,
+                pr_count=excluded.pr_count, appointment_count=excluded.appointment_count,
+                appointment_details=excluded.appointment_details, updated_at=datetime('now')`,
+        args: [
+          // COALESCE用
+          toTursoArg(memberName), toTursoArg(projectName), toTursoArg(plannedDate),
+          // INSERT用
+          toTursoArg(memberName), toTursoArg(projectName), toTursoArg(plannedDate),
+          toTursoArg(plannedCalls), toTursoArg(actualCalls), toTursoArg(prCount),
+          toTursoArg(appointmentCount), toTursoArg(appointmentDetails)
+        ]
+      }
+    });
+  }
+
+  if (requests.length === 0) return { success: 0, errors: 0 };
+
+  const result = executeTursoPipeline(requests);
+
+  let success = 0;
+  let errors = 0;
+  for (const r of result.results) {
+    if (r.type === 'ok' && r.response && r.response.type === 'execute') success++;
+    else if (r.type === 'error') {
+      Logger.log('Plans SQL error: ' + (r.error ? r.error.message : 'unknown'));
+      errors++;
+    }
+  }
+
+  return { success, errors };
+}
+
 // ==================== 診断用（手動実行） ====================
 
 /**

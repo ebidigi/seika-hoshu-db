@@ -74,3 +74,29 @@ if os.path.exists(admin_path):
     with open(os.path.join(out_dir, 'admin.html'), 'w') as f:
         f.write(admin_html)
     print(f"ビルド完了: dist/admin.html")
+
+# === CROダッシュボード ===
+dashboard_path = os.path.join(source_dir, 'dashboard.html')
+if os.path.exists(dashboard_path):
+    with open(dashboard_path, 'r') as f:
+        dash_html = f.read()
+
+    dash_css = ''
+    dash_css_path = os.path.join(source_dir, 'dashboard.css')
+    if os.path.exists(dash_css_path):
+        with open(dash_css_path, 'r') as f:
+            dash_css = f.read()
+
+    dash_js = ''
+    dash_js_path = os.path.join(source_dir, 'dashboard.js')
+    if os.path.exists(dash_js_path):
+        with open(dash_js_path, 'r') as f:
+            dash_js = f.read()
+
+    dash_html = dash_html.replace('<script src="config.js"></script>', '<script>\n' + config_js + '\n</script>')
+    dash_html = dash_html.replace('<link rel="stylesheet" href="dashboard.css">', '<style>\n' + dash_css + '\n</style>')
+    dash_html = dash_html.replace('<script src="dashboard.js"></script>', '<script>\n' + dash_js + '\n</script>')
+
+    with open(os.path.join(out_dir, 'dashboard.html'), 'w') as f:
+        f.write(dash_html)
+    print(f"ビルド完了: dist/dashboard.html")

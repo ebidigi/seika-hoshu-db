@@ -12,6 +12,7 @@ let performanceData = [];
 let appointmentsData = [];
 let executionAppoData = [];
 let assignmentsData = [];
+let dailyPlansData = [];
 let teamHistoryData = [];
 let holidaysSet = new Set();
 let charts = {};
@@ -356,7 +357,8 @@ async function loadMonthData() {
         queryTurso("SELECT * FROM appointments WHERE acquisition_date >= ? AND acquisition_date <= ? ORDER BY acquisition_date DESC", [startDate, endDate]),
         queryTurso("SELECT * FROM targets WHERE year_month = ?", [ym]),
         queryTurso("SELECT * FROM project_member_assignments WHERE year_month = ? ORDER BY project_name, member_name", [ym]),
-        queryTurso("SELECT * FROM appointments WHERE scheduled_date >= ? AND scheduled_date <= ? ORDER BY scheduled_date", [startDate, endDate])
+        queryTurso("SELECT * FROM appointments WHERE scheduled_date >= ? AND scheduled_date <= ? ORDER BY scheduled_date", [startDate, endDate]),
+        queryTurso("SELECT * FROM daily_plans WHERE planned_date >= ? AND planned_date <= ? ORDER BY planned_date", [startDate, endDate]).catch(() => [])
     ]);
 
     performanceData = results[0];
@@ -364,11 +366,13 @@ async function loadMonthData() {
     targetsData = results[2];
     assignmentsData = results[3] || [];
     executionAppoData = results[4] || [];
+    dailyPlansData = results[5] || [];
 
     normalizeDataMemberNames(performanceData);
     normalizeDataMemberNames(appointmentsData);
     normalizeDataMemberNames(executionAppoData);
     normalizeDataMemberNames(assignmentsData);
+    normalizeDataMemberNames(dailyPlansData);
 
     appointmentsData = deduplicateAppointments(appointmentsData);
     executionAppoData = deduplicateAppointments(executionAppoData);
@@ -643,6 +647,196 @@ function renderSummary() {
             </tr>`).join('')}
         </tbody>
     `;
+
+    // 日別目論見金額テーブル
+    renderDailyAmountTable(ym);
+}
+
+// ==================== Daily Amount Table ====================
+// All member/team names come from internal DB (membersData/teamsData).
+// formatYen/displayName sanitize display values.
+function renderDailyAmountTable(ym) {
+    const table = document.getElementById('summaryDailyAmountTable');
+    if (!table) return;
+
+    const memberTeamMap = getTeamsForMonth(ym);
+    const activeMembers = membersData.filter(m => m.status === 'active');
+    const teamMembers = activeMembers.filter(m => {
+        const team = memberTeamMap[m.member_name];
+        return team && team !== '未所属';
+    });
+
+    // 前日・翌日の日付を算出
+    const today = new Date();
+
+    // 前営業日を探す
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    while (yesterday.getDay() === 0 || yesterday.getDay() === 6 || holidaysSet.has(formatDateLocal(yesterday))) {
+        yesterday.setDate(yesterday.getDate() - 1);
+    }
+    const yesterdayStr = formatDateLocal(yesterday);
+
+    // 翌営業日を探す
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    while (tomorrow.getDay() === 0 || tomorrow.getDay() === 6 || holidaysSet.has(formatDateLocal(tomorrow))) {
+        tomorrow.setDate(tomorrow.getDate() + 1);
+    }
+    const tomorrowStr = formatDateLocal(tomorrow);
+
+    // 案件単価マップ
+    const projectPriceMap = {};
+    projectsData.forEach(p => { projectPriceMap[p.project_name] = parseFloat(p.unit_price) || 0; });
+
+    // 前日実績を集計（member_name別）
+    const yesterdayPerf = {};
+    performanceData.filter(d => d.input_date === yesterdayStr).forEach(d => {
+        const name = d.member_name;
+        if (!yesterdayPerf[name]) yesterdayPerf[name] = { calls: 0, pr: 0, appo: 0, amount: 0 };
+        yesterdayPerf[name].calls += parseInt(d.call_count) || 0;
+        yesterdayPerf[name].pr += parseInt(d.pr_count) || 0;
+        yesterdayPerf[name].appo += parseInt(d.appointment_count) || 0;
+        yesterdayPerf[name].amount += parseFloat(d.appointment_amount) || ((parseInt(d.appointment_count) || 0) * (projectPriceMap[d.project_name] || 0));
+    });
+
+    // 翌日予定を集計（member_name別）
+    const tomorrowPlan = {};
+    dailyPlansData.filter(d => d.planned_date === tomorrowStr).forEach(d => {
+        const name = d.member_name;
+        if (!tomorrowPlan[name]) tomorrowPlan[name] = { plannedCalls: 0, appo: 0, amount: 0 };
+        tomorrowPlan[name].plannedCalls += parseInt(d.planned_calls) || 0;
+        tomorrowPlan[name].appo += parseInt(d.appointment_count) || 0;
+        tomorrowPlan[name].amount += (parseInt(d.appointment_count) || 0) * (projectPriceMap[d.project_name] || 0);
+    });
+
+    // チーム別にグルーピング
+    const teamGroups = {};
+    teamMembers.forEach(m => {
+        const team = memberTeamMap[m.member_name] || '未所属';
+        if (!teamGroups[team]) teamGroups[team] = [];
+        teamGroups[team].push(m.member_name);
+    });
+
+    // 日付表示用フォーマット
+    const fmtDate = (d) => (d.getMonth() + 1) + '/' + d.getDate();
+
+    let totalYestCalls = 0, totalYestAppo = 0, totalYestAmount = 0;
+    let totalTomCalls = 0, totalTomAppo = 0, totalTomAmount = 0;
+
+    // Build table using DOM methods
+    table.textContent = '';
+
+    // thead
+    const thead = document.createElement('thead');
+    const headerRow1 = document.createElement('tr');
+    const thMember = document.createElement('th');
+    thMember.rowSpan = 2; thMember.textContent = 'メンバー';
+    headerRow1.appendChild(thMember);
+    const thTeam = document.createElement('th');
+    thTeam.rowSpan = 2; thTeam.textContent = 'チーム';
+    headerRow1.appendChild(thTeam);
+    const thYest = document.createElement('th');
+    thYest.colSpan = 3; thYest.className = 'group-header yesterday-header';
+    thYest.textContent = '前日実績（' + fmtDate(yesterday) + '）';
+    headerRow1.appendChild(thYest);
+    const thTom = document.createElement('th');
+    thTom.colSpan = 3; thTom.className = 'group-header tomorrow-header';
+    thTom.textContent = '翌日予定（' + fmtDate(tomorrow) + '）';
+    headerRow1.appendChild(thTom);
+    thead.appendChild(headerRow1);
+
+    const headerRow2 = document.createElement('tr');
+    ['架電', 'アポ', '金額', '架電目', 'アポ', '金額'].forEach(label => {
+        const th = document.createElement('th');
+        th.className = 'num'; th.textContent = label;
+        headerRow2.appendChild(th);
+    });
+    thead.appendChild(headerRow2);
+    table.appendChild(thead);
+
+    // tbody
+    const tbody = document.createElement('tbody');
+    const teamNames = Object.keys(teamGroups).sort();
+
+    for (const teamName of teamNames) {
+        const members = teamGroups[teamName].sort();
+        let teamYestCalls = 0, teamYestAppo = 0, teamYestAmount = 0;
+        let teamTomCalls = 0, teamTomAppo = 0, teamTomAmount = 0;
+
+        for (const name of members) {
+            const yp = yesterdayPerf[name] || { calls: 0, appo: 0, amount: 0 };
+            const tp = tomorrowPlan[name] || { plannedCalls: 0, appo: 0, amount: 0 };
+            teamYestCalls += yp.calls; teamYestAppo += yp.appo; teamYestAmount += yp.amount;
+            teamTomCalls += tp.plannedCalls; teamTomAppo += tp.appo; teamTomAmount += tp.amount;
+
+            const tr = document.createElement('tr');
+            const cells = [
+                { text: displayName(name), cls: '' },
+                { text: teamName.replace('Team', ''), cls: 'team-col' },
+                { text: yp.calls || '-', cls: 'num' },
+                { text: yp.appo || '-', cls: 'num' },
+                { text: yp.amount > 0 ? formatYen(yp.amount) : '-', cls: 'num' + (yp.amount > 0 ? ' highlight' : '') },
+                { text: tp.plannedCalls || '-', cls: 'num' },
+                { text: tp.appo || '-', cls: 'num' },
+                { text: tp.amount > 0 ? formatYen(tp.amount) : '-', cls: 'num' + (tp.amount > 0 ? ' highlight' : '') }
+            ];
+            cells.forEach(c => {
+                const td = document.createElement('td');
+                td.className = c.cls; td.textContent = c.text;
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        }
+
+        // チーム小計行
+        const subTr = document.createElement('tr');
+        subTr.className = 'subtotal-row';
+        const subTd1 = document.createElement('td');
+        subTd1.colSpan = 2; subTd1.textContent = teamName + ' 計';
+        subTr.appendChild(subTd1);
+        [
+            { text: teamYestCalls || '-', cls: 'num' },
+            { text: teamYestAppo || '-', cls: 'num' },
+            { text: teamYestAmount > 0 ? formatYen(teamYestAmount) : '-', cls: 'num highlight' },
+            { text: teamTomCalls || '-', cls: 'num' },
+            { text: teamTomAppo || '-', cls: 'num' },
+            { text: teamTomAmount > 0 ? formatYen(teamTomAmount) : '-', cls: 'num highlight' }
+        ].forEach(c => {
+            const td = document.createElement('td');
+            td.className = c.cls; td.textContent = c.text;
+            subTr.appendChild(td);
+        });
+        tbody.appendChild(subTr);
+
+        totalYestCalls += teamYestCalls; totalYestAppo += teamYestAppo; totalYestAmount += teamYestAmount;
+        totalTomCalls += teamTomCalls; totalTomAppo += teamTomAppo; totalTomAmount += teamTomAmount;
+    }
+
+    // 合計行
+    const totalTr = document.createElement('tr');
+    totalTr.className = 'total-row';
+    const totalTd1 = document.createElement('td');
+    totalTd1.colSpan = 2; totalTd1.textContent = '合計';
+    totalTr.appendChild(totalTd1);
+    [
+        { text: totalYestCalls || '-', cls: 'num' },
+        { text: totalYestAppo || '-', cls: 'num' },
+        { text: totalYestAmount > 0 ? formatYen(totalYestAmount) : '-', cls: 'num highlight' },
+        { text: totalTomCalls || '-', cls: 'num' },
+        { text: totalTomAppo || '-', cls: 'num' },
+        { text: totalTomAmount > 0 ? formatYen(totalTomAmount) : '-', cls: 'num highlight' }
+    ].forEach(c => {
+        const td = document.createElement('td');
+        td.className = c.cls; td.textContent = c.text;
+        totalTr.appendChild(td);
+    });
+    tbody.appendChild(totalTr);
+    table.appendChild(tbody);
+}
+
+function formatDateLocal(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 // ==================== Team Overview ====================

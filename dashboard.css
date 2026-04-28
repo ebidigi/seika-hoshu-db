@@ -430,6 +430,40 @@ body {
 
 .sort-icon.active { opacity: 1; color: var(--primary-blue); }
 
+/* ==================== Daily Amount Table ==================== */
+.data-table .group-header {
+    text-align: center;
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+}
+
+.data-table .yesterday-header {
+    background: var(--blue-50);
+    color: var(--primary-blue);
+}
+
+.data-table .tomorrow-header {
+    background: #fff8e1;
+    color: #b8860b;
+}
+
+.data-table .team-col {
+    font-size: 0.75rem;
+    color: var(--text-light);
+}
+
+.data-table .subtotal-row {
+    background: var(--gray-100);
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+.data-table .total-row {
+    background: var(--blue-50);
+    font-weight: 700;
+    border-top: 2px solid var(--primary-blue);
+}
+
 /* ==================== Status Badges ==================== */
 .status-badge {
     display: inline-block;
