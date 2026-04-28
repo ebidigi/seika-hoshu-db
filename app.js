@@ -4931,7 +4931,110 @@ function renderDWTargetForm() {
         cal.appendChild(row);
     }
 
-    container.appendChild(cal);
+    // === カレンダー + チーム目標を横並び ===
+    var wrapper = document.createElement('div');
+    wrapper.style.cssText = 'display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;';
+    wrapper.appendChild(cal);
+
+    // === チーム目標サイドパネル ===
+    var memberTeamMap = getTeamsForMonth(ym);
+    var teamName = memberTeamMap[memberName] || '';
+    if (teamName) {
+        var teamMembers = getTeamMembersForMonth(teamName, ym);
+        var teamTarget = getTarget('team', teamName, ym);
+        var monthlyTeamTarget = teamTarget ? (parseInt(teamTarget.appointment_amount_target) || 0) : 0;
+
+        var side = document.createElement('div');
+        side.style.cssText = 'min-width:220px;flex:1;max-width:300px;';
+
+        // チーム名ヘッダー
+        var teamHeader = document.createElement('div');
+        teamHeader.style.cssText = 'font-weight:700;font-size:0.9rem;margin-bottom:12px;padding:8px 12px;background:#e7eefb;border-radius:6px;color:#1155cc;';
+        teamHeader.textContent = teamName.replace('Team', '') + 'チーム';
+        side.appendChild(teamHeader);
+
+        // 月間目標
+        var monthCard = document.createElement('div');
+        monthCard.style.cssText = 'padding:10px 12px;background:#f8f9fb;border-radius:6px;margin-bottom:8px;';
+        var monthLabel = document.createElement('div');
+        monthLabel.style.cssText = 'font-size:0.7rem;color:#999;margin-bottom:2px;';
+        monthLabel.textContent = '月間チーム目標';
+        monthCard.appendChild(monthLabel);
+        var monthVal = document.createElement('div');
+        monthVal.style.cssText = 'font-size:1.1rem;font-weight:700;color:#333;';
+        monthVal.textContent = '¥' + monthlyTeamTarget.toLocaleString();
+        monthCard.appendChild(monthVal);
+
+        // 週間合算（現在の週）
+        var currentWeekNum = getCurrentWeekNumber(ym);
+        var weekMemberSum = 0;
+        teamMembers.forEach(function(mn) {
+            var wt = weeklyTargetsData.find(function(t) {
+                return t.member_name === mn && t.year_month === ym && parseInt(t.week_number) === currentWeekNum;
+            });
+            weekMemberSum += wt ? (parseInt(wt.amount_target) || 0) : 0;
+        });
+        var weekLabel2 = document.createElement('div');
+        weekLabel2.style.cssText = 'font-size:0.7rem;color:#999;margin-top:6px;margin-bottom:2px;';
+        weekLabel2.textContent = '第' + currentWeekNum + '週 チーム合算';
+        monthCard.appendChild(weekLabel2);
+        var weekVal = document.createElement('div');
+        weekVal.style.cssText = 'font-size:0.95rem;font-weight:600;color:#1155cc;';
+        weekVal.textContent = '¥' + weekMemberSum.toLocaleString();
+        monthCard.appendChild(weekVal);
+
+        // 日間合算（今日）
+        var todayStr = fmtDateYMD(new Date());
+        var dayMemberSum = 0;
+        teamMembers.forEach(function(mn) {
+            var dt = dailyTargetsData.find(function(t) {
+                return t.member_name === mn && t.target_date === todayStr;
+            });
+            dayMemberSum += dt ? (parseInt(dt.appointment_amount_target) || 0) : 0;
+        });
+        var dayLabel2 = document.createElement('div');
+        dayLabel2.style.cssText = 'font-size:0.7rem;color:#999;margin-top:6px;margin-bottom:2px;';
+        dayLabel2.textContent = '本日 チーム合算';
+        monthCard.appendChild(dayLabel2);
+        var dayVal = document.createElement('div');
+        dayVal.style.cssText = 'font-size:0.95rem;font-weight:600;color:#333;';
+        dayVal.textContent = '¥' + dayMemberSum.toLocaleString();
+        monthCard.appendChild(dayVal);
+
+        side.appendChild(monthCard);
+
+        // チームメンバー内訳
+        var listTitle = document.createElement('div');
+        listTitle.style.cssText = 'font-size:0.75rem;color:#999;margin:12px 0 6px;';
+        listTitle.textContent = 'メンバー別（第' + currentWeekNum + '週）';
+        side.appendChild(listTitle);
+
+        teamMembers.forEach(function(mn) {
+            var wt = weeklyTargetsData.find(function(t) {
+                return t.member_name === mn && t.year_month === ym && parseInt(t.week_number) === currentWeekNum;
+            });
+            var wVal = wt ? (parseInt(wt.amount_target) || 0) : 0;
+            var isSelf = mn === memberName;
+
+            var mRow = document.createElement('div');
+            mRow.style.cssText = 'display:flex;justify-content:space-between;padding:4px 8px;border-radius:4px;font-size:0.8rem;' + (isSelf ? 'background:#eef4ff;font-weight:600;' : '');
+
+            var mName = document.createElement('span');
+            mName.textContent = displayName(mn) + (isSelf ? ' ◀' : '');
+            mRow.appendChild(mName);
+
+            var mVal = document.createElement('span');
+            mVal.style.cssText = 'font-weight:600;color:#333;';
+            mVal.textContent = wVal > 0 ? '¥' + wVal.toLocaleString() : '-';
+            mRow.appendChild(mVal);
+
+            side.appendChild(mRow);
+        });
+
+        wrapper.appendChild(side);
+    }
+
+    container.appendChild(wrapper);
 }
 
 function getWeeksOfMonth(year, month) {
