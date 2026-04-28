@@ -557,7 +557,8 @@ body {
 }
 
 #morningScatterSection .section-title,
-#morningLineSection .section-title {
+#morningLineSection .section-title,
+#analysisNewContent .section-title {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
