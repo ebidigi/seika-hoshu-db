@@ -1415,6 +1415,7 @@ function renderMorningLineSection(ym) {
     section.appendChild(chartWrap);
 
     renderMorningLineChart(ym);
+    initCustomSelects();
 }
 
 function renderMorningLineChart(ym) {
