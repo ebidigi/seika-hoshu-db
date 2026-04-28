@@ -1245,7 +1245,7 @@ function renderMorningScatterSection() {
     titleDiv.textContent = '散布図 ';
 
     var controlsSpan = document.createElement('span');
-    controlsSpan.style.cssText = 'display:inline-flex;gap:8px;margin-left:12px;font-size:0.8rem;';
+    controlsSpan.style.cssText = 'display:inline-flex;gap:8px;margin-left:12px;font-size:0.8rem;align-items:center;vertical-align:middle;';
 
     var xLabel = document.createElement('label'); xLabel.style.fontWeight = '500'; xLabel.textContent = 'X軸';
     var xSel = document.createElement('select'); xSel.id = 'mrnScatterX'; xSel.onchange = renderMorningScatter;

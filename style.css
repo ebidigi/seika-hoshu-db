@@ -556,6 +556,14 @@ body {
     border-bottom: 2px solid var(--blue-50);
 }
 
+#morningScatterSection .section-title,
+#morningLineSection .section-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
 /* ========== チーム・メンバーグリッド ========== */
 .team-grid {
     display: grid;
