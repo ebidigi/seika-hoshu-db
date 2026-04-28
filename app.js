@@ -868,40 +868,59 @@ function initTodayTooltips() {
 }
 
 // ==================== Tab: 朝礼 ====================
+let mrnPeriod = 'month';
+
+function switchMrnPeriod(period) {
+    mrnPeriod = period;
+    document.querySelectorAll('.mrn-period-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.period === period);
+    });
+    var noFilter = { month: document.getElementById('filterMonth').value };
+    renderMorning(noFilter);
+}
+
 function renderMorning(filter) {
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
     const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
     const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
 
-    // 全体集計
+    // 営業日
+    const { elapsed, total: totalDays } = getBusinessDays(ym);
+    const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
+    const remaining = totalDays - elapsed;
+
+    // 期間に応じた目標金額
+    const periodTarget = calcMrnPeriodTarget(monthlyTarget, totalDays, ym);
+    const periodExecTarget = calcMrnPeriodTarget(executionTarget, totalDays, ym);
+
+    // 期間に応じたデータフィルタ
     const excluded = getExcludedMembers(ym);
-    const allPerf = performanceData.filter(d => !excluded.includes(d.member_name));
-    const allAppo = appointmentsData.filter(d => !excluded.includes(d.member_name));
-    const allExecAppo = executionAppoData.filter(d => !excluded.includes(d.member_name));
+    const periodData = filterByMrnPeriod(
+        performanceData.filter(d => !excluded.includes(d.member_name)),
+        appointmentsData.filter(d => !excluded.includes(d.member_name)),
+        executionAppoData.filter(d => !excluded.includes(d.member_name)),
+        ym
+    );
+    const allPerf = periodData.perf;
+    const allAppo = periodData.appo;
+    const allExecAppo = periodData.exec;
 
     const acquisitionAmount = allAppo.reduce((s, a) => s + (a.amount || 0), 0);
     const execConfirmed = allExecAppo.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
     const execUnconfirmed = allExecAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
     const execExpected = execConfirmed + execUnconfirmed;
 
-    // 営業日
-    const { elapsed, total: totalDays } = getBusinessDays(ym);
-    const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
-    const remaining = totalDays - elapsed;
-
     document.getElementById('progressBadge').textContent = `標準進捗: ${standardProgress}%`;
     document.getElementById('dateInfo').textContent = `${ym} | 経過 ${elapsed}日 / 全${totalDays}営業日`;
 
+    const periodLabels = { day: '日別', week: '週別', month: '月別', quarter: 'Q別' };
+
     // 取得進捗
-    const acqRate = monthlyTarget > 0 ? Math.round(acquisitionAmount / monthlyTarget * 1000) / 10 : 0;
-    const acqBarWidth = Math.min(acqRate, 100);
-    const acqBarColor = acqRate >= standardProgress ? '#86aaec' : acqRate >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+    const acqRate = periodTarget > 0 ? Math.round(acquisitionAmount / periodTarget * 1000) / 10 : 0;
 
     // 実施進捗
-    const confirmedRate = executionTarget > 0 ? Math.round(execConfirmed / executionTarget * 1000) / 10 : 0;
-    const confirmedBarWidth = Math.min(confirmedRate, 100);
-    const confirmedBarColor = confirmedRate >= standardProgress ? '#86aaec' : confirmedRate >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+    const confirmedRate = periodExecTarget > 0 ? Math.round(execConfirmed / periodExecTarget * 1000) / 10 : 0;
 
     // ラップ目標
     const lapTarget = Math.round(monthlyTarget * (elapsed / totalDays));
@@ -919,21 +938,27 @@ function renderMorning(filter) {
     // 着地ヨミ
     const RESKED_CANCEL_RATE_MRN = 0.15;
     const execForecastMrn = execConfirmed + Math.round(execExpected * (1 - RESKED_CANCEL_RATE_MRN));
-    const forecastDiffMrn = execForecastMrn - executionTarget;
+    const forecastDiffMrn = execForecastMrn - periodExecTarget;
     const forecastColorMrn = forecastDiffMrn >= 0 ? '#86aaec' : '#ef947a';
 
-    // KPIカード（経営タブと同じゲージスタイル）
+    // KPIカード（経営タブと同じゲージスタイル + 期間切替）
     document.getElementById('morningKpiBar').innerHTML = `
+        <div class="mgmt-period-bar">
+            <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'day' ? 'active' : ''}" data-period="day" onclick="switchMrnPeriod('day')">日別</button>
+            <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'week' ? 'active' : ''}" data-period="week" onclick="switchMrnPeriod('week')">週別</button>
+            <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'month' ? 'active' : ''}" data-period="month" onclick="switchMrnPeriod('month')">月別</button>
+            <span class="mgmt-period-label">${periodLabels[mrnPeriod]}表示</span>
+        </div>
         <div class="mgmt-top-cards">
             <div class="mgmt-gauge-card">
                 <div class="mgmt-gauge-title">取得金額</div>
                 <div class="mgmt-gauge-wrap"><canvas id="mrnGaugeAcq"></canvas></div>
-                <div class="mgmt-gauge-footer">目標 ¥${monthlyTarget.toLocaleString()}</div>
+                <div class="mgmt-gauge-footer">目標 ¥${periodTarget.toLocaleString()}</div>
             </div>
             <div class="mgmt-gauge-card">
                 <div class="mgmt-gauge-title">実施確定金額</div>
                 <div class="mgmt-gauge-wrap"><canvas id="mrnGaugeExec"></canvas></div>
-                <div class="mgmt-gauge-footer">目標 ¥${executionTarget.toLocaleString()}</div>
+                <div class="mgmt-gauge-footer">目標 ¥${periodExecTarget.toLocaleString()}</div>
                 <div class="mgmt-progress-wrap">
                     <div class="mgmt-progress-bar">
                         <div class="mgmt-progress-fill" style="width:${Math.min(confirmedRate, 100)}%;background:${confirmedRate < 50 ? 'var(--red-400)' : confirmedRate < 80 ? 'var(--yellow-300)' : 'var(--blue-200)'}"></div>
@@ -953,8 +978,8 @@ function renderMorning(filter) {
     // ゲージチャート描画（朝礼用: charts に保存、destroyMgmtCharts の影響を受けない）
     if (charts['mrnGaugeAcq']) { charts['mrnGaugeAcq'].destroy(); }
     if (charts['mrnGaugeExec']) { charts['mrnGaugeExec'].destroy(); }
-    charts['mrnGaugeAcq'] = createGaugeChart('mrnGaugeAcq', acquisitionAmount, monthlyTarget, standardProgress, '取得金額', '達成率 ' + acqRate + '%');
-    charts['mrnGaugeExec'] = createGaugeChart('mrnGaugeExec', execConfirmed, executionTarget, standardProgress, '実施確定', '達成率 ' + confirmedRate + '%');
+    charts['mrnGaugeAcq'] = createGaugeChart('mrnGaugeAcq', acquisitionAmount, periodTarget, standardProgress, '取得金額', '達成率 ' + acqRate + '%');
+    charts['mrnGaugeExec'] = createGaugeChart('mrnGaugeExec', execConfirmed, periodExecTarget, standardProgress, '実施確定', '達成率 ' + confirmedRate + '%');
 
     // アラート
     const alerts = [];
@@ -1229,6 +1254,52 @@ function renderMorningDailyAmount(ym) {
 
 function fmtDateYMD(d) {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// 朝礼用: 期間フィルタ
+function filterByMrnPeriod(perfData, appoData, execData, ym) {
+    if (mrnPeriod === 'month') return { perf: perfData, appo: appoData, exec: execData };
+    var today = new Date();
+    var startDate, endDate;
+    if (mrnPeriod === 'day') {
+        startDate = endDate = fmtDateYMD(today);
+    } else if (mrnPeriod === 'week') {
+        var dow = today.getDay();
+        var mon = new Date(today);
+        mon.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+        var sun = new Date(mon);
+        sun.setDate(mon.getDate() + 6);
+        startDate = fmtDateYMD(mon);
+        endDate = fmtDateYMD(sun);
+    }
+    return {
+        perf: perfData.filter(function(d) { return d.input_date >= startDate && d.input_date <= endDate; }),
+        appo: appoData.filter(function(d) { return d.acquisition_date >= startDate && d.acquisition_date <= endDate; }),
+        exec: execData.filter(function(d) { return d.scheduled_date >= startDate && d.scheduled_date <= endDate; })
+    };
+}
+
+// 朝礼用: 期間別目標
+function calcMrnPeriodTarget(monthlyTarget, totalBizDays, ym) {
+    if (mrnPeriod === 'month') return monthlyTarget;
+    var dailyTarget = totalBizDays > 0 ? monthlyTarget / totalBizDays : 0;
+    if (mrnPeriod === 'day') return Math.round(dailyTarget);
+    if (mrnPeriod === 'week') {
+        var today = new Date();
+        var dow = today.getDay();
+        var mon = new Date(today);
+        mon.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+        var weekBizDays = 0;
+        for (var i = 0; i < 7; i++) {
+            var d = new Date(mon);
+            d.setDate(mon.getDate() + i);
+            var ds = fmtDateYMD(d);
+            if (ds.substring(0, 7) !== ym) continue;
+            if (d.getDay() !== 0 && d.getDay() !== 6 && !holidaysSet.has(ds)) weekBizDays++;
+        }
+        return Math.round(dailyTarget * weekBizDays);
+    }
+    return monthlyTarget;
 }
 
 // ==================== 朝礼: 散布図 ====================
