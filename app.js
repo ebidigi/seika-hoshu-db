@@ -610,8 +610,8 @@ function renderAll() {
 
     // 朝礼・経営はフィルタなし（全体表示）
     const noFilter = { team: 'all', member: 'all', month: filter.month };
-    renderMorning(noFilter);
     renderManagement(noFilter);
+    renderMorning(noFilter);
 
     // 他のタブはフィルター適用
     renderAppointments();
@@ -916,41 +916,45 @@ function renderMorning(filter) {
     // 当月アポ実施率 = 当月取得のうち当月実施見込 / 当月取得アポ金額
     const currentMonthExecRate = acquisitionAmount > 0 ? Math.round(currentMonthExecAmt / acquisitionAmount * 1000) / 10 : 0;
 
-    // KPIカード（1カード1指標）
+    // 着地ヨミ
+    const RESKED_CANCEL_RATE_MRN = 0.15;
+    const execForecastMrn = execConfirmed + Math.round(execExpected * (1 - RESKED_CANCEL_RATE_MRN));
+    const forecastDiffMrn = execForecastMrn - executionTarget;
+    const forecastColorMrn = forecastDiffMrn >= 0 ? '#86aaec' : '#ef947a';
+
+    // KPIカード（経営タブと同じゲージスタイル）
     document.getElementById('morningKpiBar').innerHTML = `
-        <div class="morning-kpi-grid">
-            <div class="morning-kpi-card">
-                <div class="morning-kpi-label">取得金額</div>
-                <div class="morning-kpi-value">¥${acquisitionAmount.toLocaleString()}</div>
-                <div class="morning-kpi-sub" style="color:${acqBarColor};">達成率 ${acqRate}%</div>
-                <div class="morning-kpi-bar">
-                    <div class="morning-kpi-bar-fill" style="width:${acqBarWidth}%;background:${acqBarColor};"></div>
-                    <div class="morning-kpi-bar-std" style="left:${Math.min(standardProgress, 100)}%;"></div>
+        <div class="mgmt-top-cards">
+            <div class="mgmt-gauge-card">
+                <div class="mgmt-gauge-title">取得金額</div>
+                <div class="mgmt-gauge-wrap"><canvas id="mrnGaugeAcq"></canvas></div>
+                <div class="mgmt-gauge-footer">目標 ¥${monthlyTarget.toLocaleString()}</div>
+            </div>
+            <div class="mgmt-gauge-card">
+                <div class="mgmt-gauge-title">実施確定金額</div>
+                <div class="mgmt-gauge-wrap"><canvas id="mrnGaugeExec"></canvas></div>
+                <div class="mgmt-gauge-footer">目標 ¥${executionTarget.toLocaleString()}</div>
+                <div class="mgmt-progress-wrap">
+                    <div class="mgmt-progress-bar">
+                        <div class="mgmt-progress-fill" style="width:${Math.min(confirmedRate, 100)}%;background:${confirmedRate < 50 ? 'var(--red-400)' : confirmedRate < 80 ? 'var(--yellow-300)' : 'var(--blue-200)'}"></div>
+                    </div>
+                    <div class="mgmt-progress-label">実行達成率 ${confirmedRate}%</div>
                 </div>
-                <div class="morning-kpi-detail">目標 ¥${monthlyTarget.toLocaleString()}</div>
             </div>
-            <div class="morning-kpi-card">
-                <div class="morning-kpi-label">実施確定</div>
-                <div class="morning-kpi-value" style="color:#90b8f8;">¥${execConfirmed.toLocaleString()}</div>
-                <div class="morning-kpi-sub" style="color:${confirmedBarColor};">達成率 ${confirmedRate}%</div>
-                <div class="morning-kpi-bar">
-                    <div class="morning-kpi-bar-fill" style="width:${confirmedBarWidth}%;background:${confirmedBarColor};"></div>
-                    <div class="morning-kpi-bar-std" style="left:${Math.min(standardProgress, 100)}%;"></div>
-                </div>
-                <div class="morning-kpi-detail">目標 ¥${executionTarget.toLocaleString()}</div>
-            </div>
-            <div class="morning-kpi-card">
-                <div class="morning-kpi-label">実施見込（未確認）</div>
-                <div class="morning-kpi-value">¥${execUnconfirmed.toLocaleString()}</div>
-                <div class="morning-kpi-detail">当月 ¥${currentMonthExecAmt.toLocaleString()} / 越し ¥${prevMonthExecAmt.toLocaleString()}</div>
-            </div>
-            <div class="morning-kpi-card ${currentMonthExecRate < 60 ? 'morning-kpi-warn' : ''}">
-                <div class="morning-kpi-label">当月アポ実施率</div>
-                <div class="morning-kpi-value ${currentMonthExecRate < 60 ? 'morning-exec-warning' : ''}">${currentMonthExecRate}%${currentMonthExecRate < 60 ? ' ⚠' : ''}</div>
-                <div class="morning-kpi-detail">当月取得のうち当月実施見込の割合</div>
+            <div class="mgmt-gauge-card mgmt-yomi-card">
+                <div class="mgmt-gauge-title">着地ヨミ<span style="font-size:0.7rem;color:var(--text-light);margin-left:6px;">85%換算</span></div>
+                <div class="mgmt-yomi-value" style="color:${forecastColorMrn};">¥${execForecastMrn.toLocaleString()}</div>
+                <div class="mgmt-yomi-sub">確定 ¥${execConfirmed.toLocaleString()} ＋ 未確認 ¥${execUnconfirmed.toLocaleString()} × 85%</div>
+                <div class="mgmt-yomi-diff" style="color:${forecastColorMrn};">目標比 ${forecastDiffMrn >= 0 ? '+' : ''}¥${forecastDiffMrn.toLocaleString()}</div>
             </div>
         </div>
     `;
+
+    // ゲージチャート描画（朝礼用: charts に保存、destroyMgmtCharts の影響を受けない）
+    if (charts['mrnGaugeAcq']) { charts['mrnGaugeAcq'].destroy(); }
+    if (charts['mrnGaugeExec']) { charts['mrnGaugeExec'].destroy(); }
+    charts['mrnGaugeAcq'] = createGaugeChart('mrnGaugeAcq', acquisitionAmount, monthlyTarget, standardProgress, '取得金額', '達成率 ' + acqRate + '%');
+    charts['mrnGaugeExec'] = createGaugeChart('mrnGaugeExec', execConfirmed, executionTarget, standardProgress, '実施確定', '達成率 ' + confirmedRate + '%');
 
     // アラート
     const alerts = [];
@@ -1584,7 +1588,7 @@ function createGaugeChart(canvasId, value, max, standardPct, label, subLabel) {
         }
     };
 
-    mgmtCharts[canvasId] = new Chart(ctx, {
+    var chartInstance = new Chart(ctx, {
         type: 'doughnut',
         data: {
             datasets: [{
@@ -1624,6 +1628,8 @@ function createGaugeChart(canvasId, value, max, standardPct, label, subLabel) {
             }
         }]
     });
+    mgmtCharts[canvasId] = chartInstance;
+    return chartInstance;
 }
 
 function showMemberDetailPopup(memberName, perfData, appoData, execAppoData_) {
