@@ -34,6 +34,7 @@ let editingMemberId = null;
 let editingProjectId = null;
 let teamHistoryData = []; // member_team_history 全データ
 let executionAppoData = []; // 当月実施予定のアポ（前月以前取得含む）
+let dailyPlansData = []; // 予定報告データ
 let appoShowAll = false; // false=今日まで, true=全一覧
 let appoSortKey = 'scheduled_date'; // デフォルトソートキー
 let appoSortAsc = false; // false=降順
@@ -547,7 +548,12 @@ async function loadMonthData() {
         queryTurso(
             "SELECT * FROM appointments WHERE scheduled_date >= ? AND scheduled_date <= ? ORDER BY scheduled_date",
             [startDate, endDate]
-        )
+        ),
+        // 予定報告データ
+        queryTurso(
+            "SELECT * FROM daily_plans WHERE planned_date >= ? AND planned_date <= ? ORDER BY planned_date",
+            [startDate, endDate]
+        ).catch(function() { return []; })
     ]);
 
     performanceData = results[0];
@@ -555,12 +561,14 @@ async function loadMonthData() {
     targetsData = results[2];
     assignmentsData = results[3] || [];
     executionAppoData = results[4] || [];
+    dailyPlansData = results[5] || [];
 
     // メンバー名正規化（DB側に非正規名が入っていても正しく集計）
     normalizeDataMemberNames(performanceData);
     normalizeDataMemberNames(appointmentsData);
     normalizeDataMemberNames(executionAppoData);
     normalizeDataMemberNames(assignmentsData);
+    normalizeDataMemberNames(dailyPlansData);
 
     // 同一人物の重複アポを除去（member_name + project_name + acquisition_date + customer_name）
     appointmentsData = deduplicateAppointments(appointmentsData);
@@ -1057,6 +1065,160 @@ function renderMorning(filter) {
     </div>`;
 
     document.getElementById('morningTeamCards').innerHTML = tableHtml;
+
+    // 日別目論見金額テーブル
+    renderMorningDailyAmount(ym);
+}
+
+// ==================== 朝礼: 日別目論見金額テーブル ====================
+// All data comes from internal DB (membersData, performanceData, dailyPlansData).
+// DOM methods used for safe rendering - no innerHTML with user content.
+function renderMorningDailyAmount(ym) {
+    var table = document.getElementById('morningDailyAmountTable');
+    if (!table) return;
+
+    var memberTeamMap = getTeamsForMonth(ym);
+    var activeMembers = membersData.filter(function(m) { return m.status === 'active'; });
+    var teamMembers = activeMembers.filter(function(m) {
+        var team = memberTeamMap[m.member_name];
+        return team && team !== '未所属';
+    });
+
+    var today = new Date();
+
+    // 前営業日
+    var yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    while (yesterday.getDay() === 0 || yesterday.getDay() === 6 || holidaysSet.has(fmtDateYMD(yesterday))) {
+        yesterday.setDate(yesterday.getDate() - 1);
+    }
+    var yesterdayStr = fmtDateYMD(yesterday);
+
+    // 翌営業日
+    var tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    while (tomorrow.getDay() === 0 || tomorrow.getDay() === 6 || holidaysSet.has(fmtDateYMD(tomorrow))) {
+        tomorrow.setDate(tomorrow.getDate() + 1);
+    }
+    var tomorrowStr = fmtDateYMD(tomorrow);
+
+    // 案件単価マップ
+    var projectPriceMap = {};
+    projectsData.forEach(function(p) { projectPriceMap[p.project_name] = parseFloat(p.unit_price) || 0; });
+
+    // 前日実績集計
+    var yesterdayPerf = {};
+    performanceData.filter(function(d) { return d.input_date === yesterdayStr; }).forEach(function(d) {
+        var name = d.member_name;
+        if (!yesterdayPerf[name]) yesterdayPerf[name] = { calls: 0, appo: 0, amount: 0 };
+        yesterdayPerf[name].calls += parseInt(d.call_count) || 0;
+        yesterdayPerf[name].appo += parseInt(d.appointment_count) || 0;
+        yesterdayPerf[name].amount += parseFloat(d.appointment_amount) || ((parseInt(d.appointment_count) || 0) * (projectPriceMap[d.project_name] || 0));
+    });
+
+    // 翌日予定集計
+    var tomorrowPlan = {};
+    dailyPlansData.filter(function(d) { return d.planned_date === tomorrowStr; }).forEach(function(d) {
+        var name = d.member_name;
+        if (!tomorrowPlan[name]) tomorrowPlan[name] = { plannedCalls: 0, appo: 0, amount: 0 };
+        tomorrowPlan[name].plannedCalls += parseInt(d.planned_calls) || 0;
+        tomorrowPlan[name].appo += parseInt(d.appointment_count) || 0;
+        tomorrowPlan[name].amount += (parseInt(d.appointment_count) || 0) * (projectPriceMap[d.project_name] || 0);
+    });
+
+    // チーム別グルーピング
+    var teamGroups = {};
+    teamMembers.forEach(function(m) {
+        var team = memberTeamMap[m.member_name] || '未所属';
+        if (!teamGroups[team]) teamGroups[team] = [];
+        teamGroups[team].push(m.member_name);
+    });
+
+    var fmtDate = function(d) { return (d.getMonth() + 1) + '/' + d.getDate(); };
+    var totalYC = 0, totalYA = 0, totalYAmt = 0;
+    var totalTC = 0, totalTA = 0, totalTAmt = 0;
+
+    // DOM構築
+    table.textContent = '';
+
+    var thead = document.createElement('thead');
+    var hr1 = document.createElement('tr');
+    var thM = document.createElement('th'); thM.rowSpan = 2; thM.textContent = 'メンバー'; hr1.appendChild(thM);
+    var thT = document.createElement('th'); thT.rowSpan = 2; thT.textContent = 'チーム'; hr1.appendChild(thT);
+    var thY = document.createElement('th'); thY.colSpan = 3; thY.className = 'group-header yesterday-header'; thY.textContent = '前日実績（' + fmtDate(yesterday) + '）'; hr1.appendChild(thY);
+    var thTm = document.createElement('th'); thTm.colSpan = 3; thTm.className = 'group-header tomorrow-header'; thTm.textContent = '翌日予定（' + fmtDate(tomorrow) + '）'; hr1.appendChild(thTm);
+    thead.appendChild(hr1);
+
+    var hr2 = document.createElement('tr');
+    ['架電', 'アポ', '金額', '架電目', 'アポ', '金額'].forEach(function(label) {
+        var th = document.createElement('th'); th.className = 'num'; th.textContent = label; hr2.appendChild(th);
+    });
+    thead.appendChild(hr2);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    var teamNames = Object.keys(teamGroups).sort();
+
+    teamNames.forEach(function(teamName) {
+        var members = teamGroups[teamName].sort();
+        var tYC = 0, tYA = 0, tYAmt = 0, tTC = 0, tTA = 0, tTAmt = 0;
+
+        members.forEach(function(name) {
+            var yp = yesterdayPerf[name] || { calls: 0, appo: 0, amount: 0 };
+            var tp = tomorrowPlan[name] || { plannedCalls: 0, appo: 0, amount: 0 };
+            tYC += yp.calls; tYA += yp.appo; tYAmt += yp.amount;
+            tTC += tp.plannedCalls; tTA += tp.appo; tTAmt += tp.amount;
+
+            var tr = document.createElement('tr');
+            [
+                { t: displayName(name), c: '' },
+                { t: teamName.replace('Team', ''), c: 'team-col' },
+                { t: yp.calls || '-', c: 'num' },
+                { t: yp.appo || '-', c: 'num' },
+                { t: yp.amount > 0 ? '¥' + yp.amount.toLocaleString() : '-', c: 'num' + (yp.amount > 0 ? ' highlight' : '') },
+                { t: tp.plannedCalls || '-', c: 'num' },
+                { t: tp.appo || '-', c: 'num' },
+                { t: tp.amount > 0 ? '¥' + tp.amount.toLocaleString() : '-', c: 'num' + (tp.amount > 0 ? ' highlight' : '') }
+            ].forEach(function(cell) {
+                var td = document.createElement('td'); td.className = cell.c; td.textContent = cell.t; tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+
+        // チーム小計
+        var subTr = document.createElement('tr'); subTr.className = 'subtotal-row';
+        var subTd = document.createElement('td'); subTd.colSpan = 2; subTd.textContent = teamName + ' 計'; subTr.appendChild(subTd);
+        [
+            { t: tYC || '-', c: 'num' }, { t: tYA || '-', c: 'num' },
+            { t: tYAmt > 0 ? '¥' + tYAmt.toLocaleString() : '-', c: 'num highlight' },
+            { t: tTC || '-', c: 'num' }, { t: tTA || '-', c: 'num' },
+            { t: tTAmt > 0 ? '¥' + tTAmt.toLocaleString() : '-', c: 'num highlight' }
+        ].forEach(function(cell) {
+            var td = document.createElement('td'); td.className = cell.c; td.textContent = cell.t; subTr.appendChild(td);
+        });
+        tbody.appendChild(subTr);
+
+        totalYC += tYC; totalYA += tYA; totalYAmt += tYAmt;
+        totalTC += tTC; totalTA += tTA; totalTAmt += tTAmt;
+    });
+
+    // 合計行
+    var totalTr = document.createElement('tr'); totalTr.className = 'total-row';
+    var totalTd = document.createElement('td'); totalTd.colSpan = 2; totalTd.textContent = '合計'; totalTr.appendChild(totalTd);
+    [
+        { t: totalYC || '-', c: 'num' }, { t: totalYA || '-', c: 'num' },
+        { t: totalYAmt > 0 ? '¥' + totalYAmt.toLocaleString() : '-', c: 'num highlight' },
+        { t: totalTC || '-', c: 'num' }, { t: totalTA || '-', c: 'num' },
+        { t: totalTAmt > 0 ? '¥' + totalTAmt.toLocaleString() : '-', c: 'num highlight' }
+    ].forEach(function(cell) {
+        var td = document.createElement('td'); td.className = cell.c; td.textContent = cell.t; totalTr.appendChild(td);
+    });
+    tbody.appendChild(totalTr);
+    table.appendChild(tbody);
+}
+
+function fmtDateYMD(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 // ==================== Tab: 経営 ====================

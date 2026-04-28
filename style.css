@@ -784,6 +784,45 @@ th.sortable:hover { background: var(--gray-200); }
     font-weight: 500;
 }
 
+/* ========== 日別目論見金額テーブル ========== */
+.table-scroll-wrapper { overflow-x: auto; }
+
+.data-table .group-header {
+    text-align: center;
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+}
+.data-table .yesterday-header {
+    background: var(--blue-50, #e7eefb);
+    color: var(--primary, #1155cc);
+}
+.data-table .tomorrow-header {
+    background: #fff8e1;
+    color: #b8860b;
+}
+.data-table .team-col {
+    font-size: 0.75rem;
+    color: var(--text-light, #666);
+}
+.data-table .num {
+    text-align: right;
+    font-family: 'Poppins', sans-serif;
+}
+.data-table .highlight {
+    font-weight: 600;
+    color: var(--primary, #1155cc);
+}
+.data-table .subtotal-row {
+    background: var(--gray-100, #f1f3f5);
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+.data-table .total-row {
+    background: var(--blue-50, #e7eefb);
+    font-weight: 700;
+    border-top: 2px solid var(--primary, #1155cc);
+}
+
 /* ========== アポ確認管理 ========== */
 #appoTable td { white-space: nowrap; }
 #appoTable td:nth-child(4) { white-space: normal; }  /* 顧客名は折返し許可 */
