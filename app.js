@@ -1068,6 +1068,12 @@ function renderMorning(filter) {
 
     // 日別目論見金額テーブル
     renderMorningDailyAmount(ym);
+
+    // 散布図
+    renderMorningScatterSection();
+
+    // 日次推移グラフ
+    renderMorningLineSection(ym);
 }
 
 // ==================== 朝礼: 日別目論見金額テーブル ====================
@@ -1221,6 +1227,209 @@ function fmtDateYMD(d) {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+// ==================== 朝礼: 散布図 ====================
+function renderMorningScatterSection() {
+    var section = document.getElementById('morningScatterSection');
+    if (!section) return;
+
+    var metricOpts = ANL_METRICS.map(function(m) {
+        return '<option value="' + m.key + '">' + m.label + '</option>';
+    }).join('');
+
+    section.textContent = '';
+
+    // タイトル + セレクト
+    var titleDiv = document.createElement('div');
+    titleDiv.className = 'section-title';
+    titleDiv.style.marginTop = '24px';
+    titleDiv.textContent = '散布図 ';
+
+    var controlsSpan = document.createElement('span');
+    controlsSpan.style.cssText = 'display:inline-flex;gap:8px;margin-left:12px;font-size:0.8rem;';
+
+    var xLabel = document.createElement('label'); xLabel.style.fontWeight = '500'; xLabel.textContent = 'X軸';
+    var xSel = document.createElement('select'); xSel.id = 'mrnScatterX'; xSel.onchange = renderMorningScatter;
+    xSel.innerHTML = metricOpts;
+
+    var yLabel = document.createElement('label'); yLabel.style.fontWeight = '500'; yLabel.textContent = 'Y軸';
+    var ySel = document.createElement('select'); ySel.id = 'mrnScatterY'; ySel.onchange = renderMorningScatter;
+    ySel.innerHTML = '<option value="callToAppo">架→アポ率</option>' + metricOpts;
+
+    var sLabel = document.createElement('label'); sLabel.style.fontWeight = '500'; sLabel.textContent = 'サイズ';
+    var sSel = document.createElement('select'); sSel.id = 'mrnScatterSize'; sSel.onchange = renderMorningScatter;
+    sSel.innerHTML = '<option value="amount">取得金額</option>' + metricOpts;
+
+    controlsSpan.appendChild(xLabel); controlsSpan.appendChild(xSel);
+    controlsSpan.appendChild(yLabel); controlsSpan.appendChild(ySel);
+    controlsSpan.appendChild(sLabel); controlsSpan.appendChild(sSel);
+    titleDiv.appendChild(controlsSpan);
+    section.appendChild(titleDiv);
+
+    // チャートコンテナ
+    var chartWrap = document.createElement('div');
+    chartWrap.className = 'mgmt-chart-container';
+    chartWrap.style.height = '380px';
+    var canvas = document.createElement('canvas');
+    canvas.id = 'mrnScatterChart';
+    chartWrap.appendChild(canvas);
+    section.appendChild(chartWrap);
+
+    renderMorningScatter();
+}
+
+// ==================== 朝礼: 日次推移グラフ ====================
+const MRN_LINE_METRICS = [
+    { key: 'calls', label: '架電数', field: 'call_count' },
+    { key: 'appo', label: 'アポ数', field: 'appointment_count' },
+    { key: 'amount', label: '取得金額', field: 'appointment_amount' },
+    { key: 'pr', label: '着電数', field: 'pr_count' },
+    { key: 'hours', label: '架電時間', field: 'call_hours' },
+];
+
+function renderMorningLineSection(ym) {
+    var section = document.getElementById('morningLineSection');
+    if (!section) return;
+
+    section.textContent = '';
+
+    // タイトル行
+    var titleDiv = document.createElement('div');
+    titleDiv.className = 'section-title';
+    titleDiv.style.marginTop = '24px';
+    titleDiv.textContent = '日次推移 ';
+
+    var controls = document.createElement('span');
+    controls.style.cssText = 'display:inline-flex;gap:8px;margin-left:12px;font-size:0.8rem;align-items:center;';
+
+    // 指標セレクト
+    var mLabel = document.createElement('label'); mLabel.style.fontWeight = '500'; mLabel.textContent = '指標';
+    var mSel = document.createElement('select'); mSel.id = 'mrnLineMetric';
+    mSel.onchange = function() { renderMorningLineChart(ym); };
+    MRN_LINE_METRICS.forEach(function(m) {
+        var opt = document.createElement('option'); opt.value = m.key; opt.textContent = m.label;
+        mSel.appendChild(opt);
+    });
+
+    // メンバーセレクト
+    var memLabel = document.createElement('label'); memLabel.style.fontWeight = '500'; memLabel.textContent = 'メンバー';
+    var memSel = document.createElement('select'); memSel.id = 'mrnLineMember';
+    memSel.onchange = function() { renderMorningLineChart(ym); };
+    var optAll = document.createElement('option'); optAll.value = 'all'; optAll.textContent = '全体';
+    memSel.appendChild(optAll);
+
+    var excluded = getExcludedMembers(ym);
+    var activeMembers = membersData.filter(function(m) { return m.status === 'active' && !excluded.includes(m.member_name); });
+    var memberTeamMap = getTeamsForMonth(ym);
+    activeMembers.filter(function(m) {
+        var team = memberTeamMap[m.member_name];
+        return team && team !== '未所属';
+    }).forEach(function(m) {
+        var opt = document.createElement('option'); opt.value = m.member_name; opt.textContent = displayName(m.member_name);
+        memSel.appendChild(opt);
+    });
+
+    controls.appendChild(mLabel); controls.appendChild(mSel);
+    controls.appendChild(memLabel); controls.appendChild(memSel);
+    titleDiv.appendChild(controls);
+    section.appendChild(titleDiv);
+
+    // チャートコンテナ
+    var chartWrap = document.createElement('div');
+    chartWrap.className = 'mgmt-chart-container';
+    chartWrap.style.height = '300px';
+    var canvas = document.createElement('canvas');
+    canvas.id = 'mrnLineChart';
+    chartWrap.appendChild(canvas);
+    section.appendChild(chartWrap);
+
+    renderMorningLineChart(ym);
+}
+
+function renderMorningLineChart(ym) {
+    if (charts['mrnLine']) { charts['mrnLine'].destroy(); }
+    var ctx = document.getElementById('mrnLineChart');
+    if (!ctx) return;
+
+    var metricKey = document.getElementById('mrnLineMetric')?.value || 'calls';
+    var memberFilter = document.getElementById('mrnLineMember')?.value || 'all';
+    var metric = MRN_LINE_METRICS.find(function(m) { return m.key === metricKey; });
+    if (!metric) return;
+
+    // 当月の日付一覧（1日〜末日）
+    var parts = ym.split('-');
+    var year = parseInt(parts[0]);
+    var month = parseInt(parts[1]);
+    var lastDay = new Date(year, month, 0).getDate();
+    var dates = [];
+    for (var d = 1; d <= lastDay; d++) {
+        var ds = ym + '-' + String(d).padStart(2, '0');
+        // 土日・祝日を除外
+        var dt = new Date(year, month - 1, d);
+        if (dt.getDay() === 0 || dt.getDay() === 6) continue;
+        if (holidaysSet.has(ds)) continue;
+        dates.push(ds);
+    }
+
+    // データ集計
+    var filtered = performanceData;
+    if (memberFilter !== 'all') {
+        filtered = filtered.filter(function(r) { return r.member_name === memberFilter; });
+    }
+
+    var dailyMap = {};
+    filtered.forEach(function(r) {
+        if (!dailyMap[r.input_date]) dailyMap[r.input_date] = 0;
+        var val = parseFloat(r[metric.field]) || 0;
+        dailyMap[r.input_date] += val;
+    });
+
+    var labels = dates.map(function(ds) { return parseInt(ds.split('-')[2]) + '日'; });
+    var data = dates.map(function(ds) { return dailyMap[ds] || 0; });
+
+    // 色
+    var lineColor = '#1155cc';
+    var bgColor = 'rgba(17, 85, 204, 0.1)';
+
+    charts['mrnLine'] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: metric.label + (memberFilter !== 'all' ? '（' + displayName(memberFilter) + '）' : '（全体）'),
+                data: data,
+                borderColor: lineColor,
+                backgroundColor: bgColor,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 3,
+                pointBackgroundColor: lineColor,
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { font: { size: 10 } } },
+                x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 0 } }
+            },
+            plugins: {
+                legend: { labels: { font: { size: 11 } } },
+                tooltip: {
+                    callbacks: {
+                        label: function(tipCtx) {
+                            var v = tipCtx.raw;
+                            if (metricKey === 'amount') return '¥' + v.toLocaleString();
+                            if (metricKey === 'hours') return v.toFixed(1) + 'h';
+                            return v.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 // ==================== Tab: 経営 ====================
 // 経営タブ用チャートインスタンス管理
 const mgmtCharts = {};
@@ -1285,6 +1494,36 @@ function filterByMgmtPeriod(perfData, appoData, execAppoData, ym) {
         exec: execAppoData.filter(d => d.scheduled_date >= startDate && d.scheduled_date <= endDate)
     };
 }
+// 期間に応じた目標金額を算出
+function calcPeriodTarget(monthlyTarget, totalBizDays, ym) {
+    if (mgmtPeriod === 'month') return monthlyTarget;
+    if (mgmtPeriod === 'quarter') return monthlyTarget * 3;
+
+    var dailyTarget = totalBizDays > 0 ? monthlyTarget / totalBizDays : 0;
+
+    if (mgmtPeriod === 'day') {
+        return Math.round(dailyTarget);
+    }
+    if (mgmtPeriod === 'week') {
+        // 今週の営業日数をカウント
+        var today = new Date();
+        var dow = today.getDay();
+        var mon = new Date(today);
+        mon.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+        var weekBizDays = 0;
+        for (var i = 0; i < 7; i++) {
+            var d = new Date(mon);
+            d.setDate(mon.getDate() + i);
+            var ds = fmtDateYMD(d);
+            var dym = ds.substring(0, 7);
+            if (dym !== ym) continue;
+            if (d.getDay() !== 0 && d.getDay() !== 6 && !holidaysSet.has(ds)) weekBizDays++;
+        }
+        return Math.round(dailyTarget * weekBizDays);
+    }
+    return monthlyTarget;
+}
+
 function destroyMgmtCharts() {
     Object.keys(mgmtCharts).forEach(k => { if (mgmtCharts[k]) { mgmtCharts[k].destroy(); delete mgmtCharts[k]; } });
 }
@@ -1466,8 +1705,13 @@ function renderManagement(filter) {
 
     const { elapsed, total: totalDays } = getBusinessDays(ym);
     const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
-    const acqRate = monthlyTarget > 0 ? Math.round(acquisitionAmount / monthlyTarget * 1000) / 10 : 0;
-    const execRate = executionTarget > 0 ? Math.round(execConfirmed / executionTarget * 1000) / 10 : 0;
+
+    // 期間に応じた目標金額を算出
+    const periodTarget = calcPeriodTarget(monthlyTarget, totalDays, ym);
+    const periodExecTarget = calcPeriodTarget(executionTarget, totalDays, ym);
+
+    const acqRate = periodTarget > 0 ? Math.round(acquisitionAmount / periodTarget * 1000) / 10 : 0;
+    const execRate = periodExecTarget > 0 ? Math.round(execConfirmed / periodExecTarget * 1000) / 10 : 0;
 
     // 実施見込内訳
     const allExecAppoActive = allExecAppo.filter(a => a.status === '実施' || a.status === '未確認');
@@ -1476,7 +1720,7 @@ function renderManagement(filter) {
 
     // 着地ヨミ = 実施確定 + 未確認 × (1 - キャンセル率)
     const execForecast = execConfirmed + Math.round(execUnconfirmed * (1 - RESKED_CANCEL_RATE));
-    const forecastDiff = execForecast - executionTarget;
+    const forecastDiff = execForecast - periodExecTarget;
     const forecastColor = forecastDiff >= 0 ? '#86aaec' : '#ef947a';
 
     // アポ実施タイミング内訳（全アポ対象: 取得月×実施月の組み合わせ）
@@ -1627,12 +1871,12 @@ function renderManagement(filter) {
         <div class="mgmt-gauge-card">
             <div class="mgmt-gauge-title">取得金額</div>
             <div class="mgmt-gauge-wrap"><canvas id="mgmtGaugeAcq"></canvas></div>
-            <div class="mgmt-gauge-footer">目標 ¥${monthlyTarget.toLocaleString()}</div>
+            <div class="mgmt-gauge-footer">目標 ¥${periodTarget.toLocaleString()}</div>
         </div>
         <div class="mgmt-gauge-card">
             <div class="mgmt-gauge-title">実施確定金額</div>
             <div class="mgmt-gauge-wrap"><canvas id="mgmtGaugeExec"></canvas></div>
-            <div class="mgmt-gauge-footer">目標 ¥${executionTarget.toLocaleString()}</div>
+            <div class="mgmt-gauge-footer">目標 ¥${periodExecTarget.toLocaleString()}</div>
             <div class="mgmt-progress-wrap">
                 <div class="mgmt-progress-bar">
                     <div class="mgmt-progress-fill" style="width:${Math.min(execRate, 100)}%;background:${execRate < 50 ? 'var(--red-400)' : execRate < 80 ? 'var(--yellow-300)' : 'var(--blue-200)'}"></div>
@@ -1739,8 +1983,8 @@ function renderManagement(filter) {
     document.getElementById('mgmtAssignmentAssess').innerHTML = '';
 
     // ========== チャート描画 ==========
-    createGaugeChart('mgmtGaugeAcq', acquisitionAmount, monthlyTarget, standardProgress, '取得金額', `達成率 ${acqRate}%`);
-    createGaugeChart('mgmtGaugeExec', execConfirmed, executionTarget, standardProgress, '実施確定', `達成率 ${execRate}%`);
+    createGaugeChart('mgmtGaugeAcq', acquisitionAmount, periodTarget, standardProgress, '取得金額', `達成率 ${acqRate}%`);
+    createGaugeChart('mgmtGaugeExec', execConfirmed, periodExecTarget, standardProgress, '実施確定', `達成率 ${execRate}%`);
 
     // 円グラフ中心テキスト描画プラグイン
     function pieCenterPlugin(centerText) {
@@ -2390,37 +2634,30 @@ function renderCancelTrend() {
     });
 }
 
-// 散布図
-function renderScatter() {
-    if (!analysisCompareData) return;
-    if (analysisCharts['anlScatter']) { analysisCharts['anlScatter'].destroy(); }
-    const { dataA } = analysisCompareData;
-    const proj = document.getElementById('anlProjectFilter')?.value;
-    const xKey = document.getElementById('anlScatterX')?.value || 'calls';
-    const yKey = document.getElementById('anlScatterY')?.value || 'callToAppo';
-    const sizeKey = document.getElementById('anlScatterSize')?.value || 'amount';
+// 散布図（共通描画関数）
+const SCATTER_COLORS = ['#86aaec', '#c4b5fd', '#ef947a', '#a8d8b9', '#ede07d', '#f0b8d0', '#90b8f8', '#b8d4f0', '#d4a8e0', '#f0c8a8', '#a8c8f0', '#c8e0a8', '#e0b8c8', '#b8e0d4', '#e0d4a8'];
+
+function renderScatterChart(canvasId, chartStore, chartKey, perfData, xKey, yKey, sizeKey, proj) {
+    if (chartStore[chartKey]) { chartStore[chartKey].destroy(); }
     const excluded = getExcludedMembers(document.getElementById('filterMonth').value);
     const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
 
     const xMeta = ANL_METRICS.find(m => m.key === xKey);
     const yMeta = ANL_METRICS.find(m => m.key === yKey);
-    const sMeta = ANL_METRICS.find(m => m.key === sizeKey);
 
-    const allStats = activeMembers.map(m => ({ name: m.member_name, ...calcMemberStats(dataA, m.member_name, proj) }));
+    const allStats = activeMembers.map(m => ({ name: m.member_name, ...calcMemberStats(perfData, m.member_name, proj) }));
     const maxSize = Math.max(...allStats.map(s => s[sizeKey]), 1);
 
-    const colors = ['#86aaec', '#c4b5fd', '#ef947a', '#a8d8b9', '#ede07d', '#f0b8d0', '#90b8f8', '#b8d4f0', '#d4a8e0', '#f0c8a8', '#a8c8f0', '#c8e0a8', '#e0b8c8', '#b8e0d4', '#e0d4a8'];
-
-    const ctx = document.getElementById('anlScatterChart');
+    const ctx = document.getElementById(canvasId);
     if (!ctx) return;
-    analysisCharts['anlScatter'] = new Chart(ctx, {
+    chartStore[chartKey] = new Chart(ctx, {
         type: 'bubble',
         data: {
             datasets: allStats.map((s, i) => ({
                 label: s.name,
                 data: [{ x: s[xKey], y: s[yKey], r: Math.max(4, s[sizeKey] / maxSize * 30) }],
-                backgroundColor: colors[i % colors.length] + 'aa',
-                borderColor: colors[i % colors.length],
+                backgroundColor: SCATTER_COLORS[i % SCATTER_COLORS.length] + 'aa',
+                borderColor: SCATTER_COLORS[i % SCATTER_COLORS.length],
                 borderWidth: 1.5,
             }))
         },
@@ -2434,15 +2671,34 @@ function renderScatter() {
                 legend: { position: 'right', labels: { font: { size: 10 }, usePointStyle: true, padding: 8 } },
                 tooltip: {
                     callbacks: {
-                        label: (ctx) => {
-                            const d = ctx.raw;
-                            return `${ctx.dataset.label}: ${xMeta?.label}=${xMeta?.fmt(d.x)}, ${yMeta?.label}=${yMeta?.fmt(d.y)}`;
+                        label: (tipCtx) => {
+                            const d = tipCtx.raw;
+                            return `${tipCtx.dataset.label}: ${xMeta?.label}=${xMeta?.fmt(d.x)}, ${yMeta?.label}=${yMeta?.fmt(d.y)}`;
                         }
                     }
                 }
             }
         }
     });
+}
+
+// 詳細分析タブ用ラッパー
+function renderScatter() {
+    if (!analysisCompareData) return;
+    const { dataA } = analysisCompareData;
+    const proj = document.getElementById('anlProjectFilter')?.value;
+    const xKey = document.getElementById('anlScatterX')?.value || 'calls';
+    const yKey = document.getElementById('anlScatterY')?.value || 'callToAppo';
+    const sizeKey = document.getElementById('anlScatterSize')?.value || 'amount';
+    renderScatterChart('anlScatterChart', analysisCharts, 'anlScatter', dataA, xKey, yKey, sizeKey, proj);
+}
+
+// 朝礼タブ用ラッパー
+function renderMorningScatter() {
+    const xKey = document.getElementById('mrnScatterX')?.value || 'calls';
+    const yKey = document.getElementById('mrnScatterY')?.value || 'callToAppo';
+    const sizeKey = document.getElementById('mrnScatterSize')?.value || 'amount';
+    renderScatterChart('mrnScatterChart', charts, 'mrnScatter', performanceData, xKey, yKey, sizeKey, 'all');
 }
 
 // ==================== Tab: 個人分析 ====================
