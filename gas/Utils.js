@@ -7,7 +7,7 @@ const SEIKA_CONFIG = {
   SPREADSHEET_ID: '1Qo9LvDqUgkPVcaoDN-t4p8YKryoILKEMdMugDlpDTIQ',
   PERFORMANCE_SHEET: '実績rawdata',
   SALES_SHEET: '売上報告rawdata',
-  PLANS_SHEET: '予定報告',
+  PLANS_SHEET: '予定rawdata',
   SYNC_DAYS: 45,
   PLANS_SYNC_DAYS: 7,
   BATCH_SIZE: 50,
