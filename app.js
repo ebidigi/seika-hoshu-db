@@ -35,6 +35,8 @@ let editingProjectId = null;
 let teamHistoryData = []; // member_team_history 全データ
 let executionAppoData = []; // 当月実施予定のアポ（前月以前取得含む）
 let dailyPlansData = []; // 予定報告データ
+let dailyTargetsData = []; // 日別目標
+let weeklyTargetsData = []; // 週別目標
 let appoShowAll = false; // false=今日まで, true=全一覧
 let appoSortKey = 'scheduled_date'; // デフォルトソートキー
 let appoSortAsc = false; // false=降順
@@ -553,6 +555,14 @@ async function loadMonthData() {
         queryTurso(
             "SELECT * FROM daily_plans WHERE planned_date >= ? AND planned_date <= ? ORDER BY planned_date",
             [startDate, endDate]
+        ).catch(function() { return []; }),
+        queryTurso(
+            "SELECT * FROM daily_targets WHERE target_date >= ? AND target_date <= ?",
+            [startDate, endDate]
+        ).catch(function() { return []; }),
+        queryTurso(
+            "SELECT * FROM weekly_targets WHERE year_month = ?",
+            [ym]
         ).catch(function() { return []; })
     ]);
 
@@ -562,6 +572,8 @@ async function loadMonthData() {
     assignmentsData = results[3] || [];
     executionAppoData = results[4] || [];
     dailyPlansData = results[5] || [];
+    dailyTargetsData = results[6] || [];
+    weeklyTargetsData = results[7] || [];
 
     // メンバー名正規化（DB側に非正規名が入っていても正しく集計）
     normalizeDataMemberNames(performanceData);
@@ -1279,9 +1291,21 @@ function filterByMrnPeriod(perfData, appoData, execData, ym) {
 // 朝礼用: 期間別目標
 function calcMrnPeriodTarget(monthlyTarget, totalBizDays, ym) {
     if (mrnPeriod === 'month') return monthlyTarget;
-    var dailyTarget = totalBizDays > 0 ? monthlyTarget / totalBizDays : 0;
-    if (mrnPeriod === 'day') return Math.round(dailyTarget);
+
+    // 日別: dailyTargetsData から合算、なければ自動計算
+    if (mrnPeriod === 'day') {
+        var todayStr = fmtDateYMD(new Date());
+        var daySum = sumDailyTargets(todayStr);
+        if (daySum > 0) return daySum;
+        return totalBizDays > 0 ? Math.round(monthlyTarget / totalBizDays) : 0;
+    }
+
+    // 週別: weeklyTargetsData から合算、なければ自動計算
     if (mrnPeriod === 'week') {
+        var weekNum = getCurrentWeekNumber(ym);
+        var weekSum = sumWeeklyTargets(ym, weekNum);
+        if (weekSum > 0) return weekSum;
+        // フォールバック: 自動計算
         var today = new Date();
         var dow = today.getDay();
         var mon = new Date(today);
@@ -1294,9 +1318,37 @@ function calcMrnPeriodTarget(monthlyTarget, totalBizDays, ym) {
             if (ds.substring(0, 7) !== ym) continue;
             if (d.getDay() !== 0 && d.getDay() !== 6 && !holidaysSet.has(ds)) weekBizDays++;
         }
+        var dailyTarget = totalBizDays > 0 ? monthlyTarget / totalBizDays : 0;
         return Math.round(dailyTarget * weekBizDays);
     }
     return monthlyTarget;
+}
+
+// 日別目標の全メンバー合算
+function sumDailyTargets(dateStr) {
+    return dailyTargetsData
+        .filter(function(t) { return t.target_date === dateStr; })
+        .reduce(function(s, t) { return s + (parseInt(t.appointment_amount_target) || 0); }, 0);
+}
+
+// 週別目標の全メンバー合算
+function sumWeeklyTargets(ym, weekNum) {
+    return weeklyTargetsData
+        .filter(function(t) { return t.year_month === ym && parseInt(t.week_number) === weekNum; })
+        .reduce(function(s, t) { return s + (parseInt(t.amount_target) || 0); }, 0);
+}
+
+// 今日が何週目か算出
+function getCurrentWeekNumber(ym) {
+    var parts = ym.split('-');
+    var year = parseInt(parts[0]);
+    var month = parseInt(parts[1]);
+    var weeks = getWeeksOfMonth(year, month);
+    var today = new Date().getDate();
+    for (var i = 0; i < weeks.length; i++) {
+        if (today >= weeks[i].startDay && today <= weeks[i].endDay) return weeks[i].num;
+    }
+    return weeks.length > 0 ? weeks[weeks.length - 1].num : 1;
 }
 
 // ==================== 朝礼: 散布図 ====================
@@ -1572,13 +1624,17 @@ function calcPeriodTarget(monthlyTarget, totalBizDays, ym) {
     if (mgmtPeriod === 'month') return monthlyTarget;
     if (mgmtPeriod === 'quarter') return monthlyTarget * 3;
 
-    var dailyTarget = totalBizDays > 0 ? monthlyTarget / totalBizDays : 0;
-
     if (mgmtPeriod === 'day') {
-        return Math.round(dailyTarget);
+        var todayStr = fmtDateYMD(new Date());
+        var daySum = sumDailyTargets(todayStr);
+        if (daySum > 0) return daySum;
+        return totalBizDays > 0 ? Math.round(monthlyTarget / totalBizDays) : 0;
     }
     if (mgmtPeriod === 'week') {
-        // 今週の営業日数をカウント
+        var weekNum = getCurrentWeekNumber(ym);
+        var weekSum = sumWeeklyTargets(ym, weekNum);
+        if (weekSum > 0) return weekSum;
+        // フォールバック
         var today = new Date();
         var dow = today.getDay();
         var mon = new Date(today);
@@ -1592,6 +1648,7 @@ function calcPeriodTarget(monthlyTarget, totalBizDays, ym) {
             if (dym !== ym) continue;
             if (d.getDay() !== 0 && d.getDay() !== 6 && !holidaysSet.has(ds)) weekBizDays++;
         }
+        var dailyTarget = totalBizDays > 0 ? monthlyTarget / totalBizDays : 0;
         return Math.round(dailyTarget * weekBizDays);
     }
     return monthlyTarget;
@@ -4677,6 +4734,206 @@ function renderSettings() {
         `;
     });
     document.getElementById('memberManageBody').innerHTML = memberRows;
+
+    // 日別/週別目標: メンバードロップダウン初期化
+    initDWTargetMemberSelect(ym);
+}
+
+// ==================== 日別・週別 目標設定 ====================
+
+function initDWTargetMemberSelect(ym) {
+    var sel = document.getElementById('dwTargetMember');
+    if (!sel) return;
+
+    // 既存カスタムラッパーを削除して再生成
+    sel.classList.remove('custom-initialized');
+    sel.style.display = '';
+    var oldWrap = sel.nextElementSibling;
+    if (oldWrap && oldWrap.classList.contains('custom-select-wrap')) oldWrap.remove();
+
+    sel.textContent = '';
+    var excluded = getExcludedMembers(ym);
+    var memberTeamMap = getTeamsForMonth(ym);
+    membersData.filter(function(m) {
+        return m.status === 'active' && !excluded.includes(m.member_name);
+    }).filter(function(m) {
+        var team = memberTeamMap[m.member_name];
+        return team && team !== '未所属';
+    }).forEach(function(m) {
+        var opt = document.createElement('option');
+        opt.value = m.member_name;
+        opt.textContent = displayName(m.member_name);
+        sel.appendChild(opt);
+    });
+    sel.addEventListener('change', function() { renderDWTargetForm(); });
+    renderDWTargetForm();
+    initCustomSelects();
+}
+
+function renderDWTargetForm() {
+    var container = document.getElementById('dwTargetContent');
+    if (!container) return;
+    container.textContent = '';
+
+    var ym = document.getElementById('filterMonth').value;
+    var memberName = document.getElementById('dwTargetMember')?.value;
+    if (!memberName) return;
+
+    var parts = ym.split('-');
+    var year = parseInt(parts[0]);
+    var month = parseInt(parts[1]);
+    var lastDay = new Date(year, month, 0).getDate();
+    var dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+
+    // === 週別目標 ===
+    var weekTitle = document.createElement('h4');
+    weekTitle.textContent = '週別目標（' + month + '月）';
+    weekTitle.style.cssText = 'margin:0 0 8px;font-size:0.9rem;';
+    container.appendChild(weekTitle);
+
+    var weeks = getWeeksOfMonth(year, month);
+    var weekGrid = document.createElement('div');
+    weekGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px;';
+
+    weeks.forEach(function(w) {
+        var existing = weeklyTargetsData.find(function(t) {
+            return t.member_name === memberName && t.year_month === ym && parseInt(t.week_number) === w.num;
+        });
+        var val = existing ? (parseInt(existing.amount_target) || 0) : 0;
+
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;';
+
+        var label = document.createElement('span');
+        label.style.cssText = 'font-size:0.8rem;min-width:120px;';
+        label.textContent = '第' + w.num + '週(' + (month) + '/' + w.startDay + '-' + (month) + '/' + w.endDay + ')';
+
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.value = val;
+        input.id = 'dwWeek_' + w.num;
+        input.style.cssText = 'width:120px;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:0.85rem;';
+
+        row.appendChild(label);
+        row.appendChild(input);
+        weekGrid.appendChild(row);
+    });
+    container.appendChild(weekGrid);
+
+    // === 日別目標 ===
+    var dayTitle = document.createElement('h4');
+    dayTitle.textContent = '日別目標（' + month + '月）';
+    dayTitle.style.cssText = 'margin:0 0 8px;font-size:0.9rem;';
+    container.appendChild(dayTitle);
+
+    var dayGrid = document.createElement('div');
+    dayGrid.style.cssText = 'display:grid;grid-template-columns:repeat(5, 1fr);gap:6px;';
+
+    for (var d = 1; d <= lastDay; d++) {
+        var dt = new Date(year, month - 1, d);
+        if (dt.getDay() === 0 || dt.getDay() === 6) continue;
+        var ds = ym + '-' + String(d).padStart(2, '0');
+        if (holidaysSet.has(ds)) continue;
+
+        var existing = dailyTargetsData.find(function(t) {
+            return t.member_name === memberName && t.target_date === ds;
+        });
+        var val = existing ? (parseInt(existing.appointment_amount_target) || 0) : 0;
+
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:4px;';
+
+        var label = document.createElement('span');
+        label.style.cssText = 'font-size:0.75rem;min-width:48px;color:var(--text-light);';
+        label.textContent = d + '日(' + dayNames[dt.getDay()] + ')';
+
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.value = val;
+        input.id = 'dwDay_' + ds;
+        input.style.cssText = 'width:90px;padding:4px 6px;border:1px solid var(--border-color);border-radius:4px;font-size:0.8rem;';
+
+        row.appendChild(label);
+        row.appendChild(input);
+        dayGrid.appendChild(row);
+    }
+    container.appendChild(dayGrid);
+}
+
+function getWeeksOfMonth(year, month) {
+    var weeks = [];
+    var weekNum = 1;
+    var d = 1;
+    var lastDay = new Date(year, month, 0).getDate();
+
+    while (d <= lastDay) {
+        var startD = d;
+        var dt = new Date(year, month - 1, d);
+        // 週末をスキップして最初の営業日を見つける
+        while (d <= lastDay && (new Date(year, month - 1, d).getDay() === 0 || new Date(year, month - 1, d).getDay() === 6)) d++;
+        if (d > lastDay) break;
+        var weekStart = d;
+        // 金曜日まで or 月末まで
+        while (d <= lastDay && new Date(year, month - 1, d).getDay() !== 0 && new Date(year, month - 1, d).getDay() !== 6) d++;
+        var weekEnd = d - 1;
+        if (weekStart <= lastDay) {
+            weeks.push({ num: weekNum, startDay: weekStart, endDay: Math.min(weekEnd, lastDay) });
+            weekNum++;
+        }
+        // 次の月曜日へ
+        while (d <= lastDay && (new Date(year, month - 1, d).getDay() === 0 || new Date(year, month - 1, d).getDay() === 6)) d++;
+    }
+    return weeks;
+}
+
+async function saveDWTargets() {
+    var ym = document.getElementById('filterMonth').value;
+    var memberName = document.getElementById('dwTargetMember')?.value;
+    if (!memberName) return;
+
+    var parts = ym.split('-');
+    var year = parseInt(parts[0]);
+    var month = parseInt(parts[1]);
+    var msgEl = document.getElementById('dwTargetMessage');
+
+    try {
+        // 週別保存
+        var weeks = getWeeksOfMonth(year, month);
+        for (var i = 0; i < weeks.length; i++) {
+            var w = weeks[i];
+            var input = document.getElementById('dwWeek_' + w.num);
+            var val = input ? (parseInt(input.value) || 0) : 0;
+            var weekStart = ym + '-' + String(w.startDay).padStart(2, '0');
+            var weekEnd = ym + '-' + String(w.endDay).padStart(2, '0');
+            await executeTurso(
+                "INSERT INTO weekly_targets (id, member_name, year_month, week_number, week_start, week_end, amount_target) VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?) ON CONFLICT(member_name, year_month, week_number) DO UPDATE SET amount_target=excluded.amount_target, week_start=excluded.week_start, week_end=excluded.week_end",
+                [memberName, ym, w.num, weekStart, weekEnd, val]
+            );
+        }
+
+        // 日別保存
+        var lastDay = new Date(year, month, 0).getDate();
+        for (var d = 1; d <= lastDay; d++) {
+            var dt = new Date(year, month - 1, d);
+            if (dt.getDay() === 0 || dt.getDay() === 6) continue;
+            var ds = ym + '-' + String(d).padStart(2, '0');
+            if (holidaysSet.has(ds)) continue;
+            var input = document.getElementById('dwDay_' + ds);
+            var val = input ? (parseInt(input.value) || 0) : 0;
+            await executeTurso(
+                "INSERT INTO daily_targets (id, member_name, target_date, appointment_amount_target) VALUES (lower(hex(randomblob(16))), ?, ?, ?) ON CONFLICT(member_name, target_date) DO UPDATE SET appointment_amount_target=excluded.appointment_amount_target",
+                [memberName, ds, val]
+            );
+        }
+
+        showToast(displayName(memberName) + ' の日別・週別目標を保存しました');
+        // リロード
+        await loadMonthData();
+    } catch (e) {
+        showToast('保存エラー: ' + e.message, true);
+    }
 }
 
 function showToast(message, isError = false) {

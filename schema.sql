@@ -116,6 +116,19 @@ CREATE TABLE IF NOT EXISTS daily_targets (
   UNIQUE(member_name, target_date)
 );
 
+-- 週別目標
+CREATE TABLE IF NOT EXISTS weekly_targets (
+  id TEXT PRIMARY KEY,
+  member_name TEXT NOT NULL,
+  year_month TEXT NOT NULL,
+  week_number INTEGER NOT NULL,
+  week_start TEXT NOT NULL,
+  week_end TEXT NOT NULL,
+  amount_target INTEGER DEFAULT 0,
+  UNIQUE(member_name, year_month, week_number)
+);
+CREATE INDEX IF NOT EXISTS idx_wt_ym ON weekly_targets(year_month);
+
 -- 休日マスタ
 CREATE TABLE IF NOT EXISTS holidays (
   date TEXT PRIMARY KEY

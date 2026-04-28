@@ -273,6 +273,18 @@
                         <button class="save-btn" onclick="saveTargets()">保存</button>
                     </div>
 
+                    <!-- 日別/週別目標 -->
+                    <div class="settings-section">
+                        <h3>日別・週別 目標設定</h3>
+                        <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;">
+                            <label style="font-weight:500;">メンバー</label>
+                            <select id="dwTargetMember"></select>
+                        </div>
+                        <div id="dwTargetContent"></div>
+                        <div class="settings-message" id="dwTargetMessage"></div>
+                        <button class="save-btn" onclick="saveDWTargets()" style="margin-top:12px;">保存</button>
+                    </div>
+
                     <!-- メンバー管理 -->
                     <div class="settings-section">
                         <h3>メンバー・チーム管理</h3>
