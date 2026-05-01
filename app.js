@@ -454,6 +454,41 @@ function computeTeamStats(teamName, ym) {
     };
 }
 
+// ==================== メンバー個別統計集計 ====================
+function computeMemberStats(memberName, ym) {
+    const perf = performanceData.filter(d => d.member_name === memberName);
+    const appo = appointmentsData.filter(d => d.member_name === memberName);
+    const execAppo = executionAppoData.filter(d => d.member_name === memberName);
+
+    const callCount = sum(perf, 'call_count');
+    const prCount = sum(perf, 'pr_count');
+    const appoCount = sum(perf, 'appointment_count');
+    const appoAmount = sum(perf, 'appointment_amount');
+    const execAmount = execAppo.filter(a => a.status === '実施').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const execUnconfirmedAmount = execAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+
+    const memberTarget = getTarget('member', memberName, ym);
+    const appoTarget = memberTarget ? (parseFloat(memberTarget.appointment_amount_target) || 0) : 0;
+    const execTarget = memberTarget ? (parseFloat(memberTarget.execution_target) || 0) : 0;
+
+    // 実施見込内訳（キャンセル・リスケ除外）
+    const execAppoActive = execAppo.filter(a => a.status === '実施' || a.status === '未確認');
+    const currentMonthExec = execAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym));
+    const prevMonthExec = execAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym));
+    const currentMonthExecAmount = currentMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const prevMonthExecAmount = prevMonthExec.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const currentMonthAcqAmount = appo.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const currentMonthExecRate = currentMonthAcqAmount > 0 ? currentMonthExecAmount / currentMonthAcqAmount * 100 : 0;
+
+    return {
+        callCount, prCount, appoCount, appoAmount,
+        execAmount, execUnconfirmedAmount,
+        appoTarget, execTarget,
+        currentMonthExecAmount, prevMonthExecAmount, currentMonthExecRate,
+        perf, appo, execAppo
+    };
+}
+
 // ==================== メンバー自動登録 ====================
 async function ensureMembers() {
     // 未登録メンバーの追加
@@ -967,17 +1002,6 @@ function renderMorning(filter) {
                 <div class="mgmt-gauge-wrap"><canvas id="mrnGaugeAcq"></canvas></div>
                 <div class="mgmt-gauge-footer">目標 ¥${periodTarget.toLocaleString()}</div>
             </div>
-            <div class="mgmt-gauge-card">
-                <div class="mgmt-gauge-title">実施確定金額</div>
-                <div class="mgmt-gauge-wrap"><canvas id="mrnGaugeExec"></canvas></div>
-                <div class="mgmt-gauge-footer">目標 ¥${periodExecTarget.toLocaleString()}</div>
-                <div class="mgmt-progress-wrap">
-                    <div class="mgmt-progress-bar">
-                        <div class="mgmt-progress-fill" style="width:${Math.min(confirmedRate, 100)}%;background:${confirmedRate < 50 ? 'var(--red-400)' : confirmedRate < 80 ? 'var(--yellow-300)' : 'var(--blue-200)'}"></div>
-                    </div>
-                    <div class="mgmt-progress-label">実行達成率 ${confirmedRate}%</div>
-                </div>
-            </div>
             <div class="mgmt-gauge-card mgmt-yomi-card">
                 <div class="mgmt-gauge-title">着地ヨミ<span style="font-size:0.7rem;color:var(--text-light);margin-left:6px;">85%換算</span></div>
                 <div class="mgmt-yomi-value" style="color:${forecastColorMrn};">¥${execForecastMrn.toLocaleString()}</div>
@@ -989,9 +1013,7 @@ function renderMorning(filter) {
 
     // ゲージチャート描画（朝礼用: charts に保存、destroyMgmtCharts の影響を受けない）
     if (charts['mrnGaugeAcq']) { charts['mrnGaugeAcq'].destroy(); }
-    if (charts['mrnGaugeExec']) { charts['mrnGaugeExec'].destroy(); }
     charts['mrnGaugeAcq'] = createGaugeChart('mrnGaugeAcq', acquisitionAmount, periodTarget, standardProgress, '取得金額', '達成率 ' + acqRate + '%');
-    charts['mrnGaugeExec'] = createGaugeChart('mrnGaugeExec', execConfirmed, periodExecTarget, standardProgress, '実施確定', '達成率 ' + confirmedRate + '%');
 
     // アラート
     const alerts = [];
@@ -1007,28 +1029,42 @@ function renderMorning(filter) {
         `<div class="alert-banner"><span class="alert-banner-icon">&#9888;</span><span class="alert-banner-text">${a}</span></div>`
     ).join('');
 
-    // チーム比較テーブル
-    const teamNames = getActiveTeamNames(ym);
-    const teamRows = teamNames.map(teamName => {
-        const s = computeTeamStats(teamName, ym);
+    // メンバー比較テーブル（個人単位）
+    const memberTeamMap = getTeamsForMonth(ym);
+    const excludedSet = new Set(getExcludedMembers(ym));
+    const memberNames = Object.keys(memberTeamMap)
+        .filter(name => !excludedSet.has(name))
+        .filter(name => {
+            const t = memberTeamMap[name];
+            return t && t !== '未所属' && t !== '所属なし';
+        });
+
+    const memberRows = memberNames.map(memberName => {
+        const teamName = memberTeamMap[memberName];
+        const s = computeMemberStats(memberName, ym);
         const lap = totalDays > 0 ? Math.round(s.appoTarget * (elapsed / totalDays)) : 0;
         const acqR = s.appoTarget > 0 ? Math.round(s.appoAmount / s.appoTarget * 1000) / 10 : 0;
         const execR = s.execTarget > 0 ? Math.round(s.execAmount / s.execTarget * 1000) / 10 : 0;
         const acqColor = acqR >= standardProgress ? '#86aaec' : acqR >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
         const execColor = execR >= standardProgress ? '#86aaec' : execR >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
         const execWarn = s.currentMonthExecRate < 60;
-        return { teamName, s, lap, acqR, execR, acqColor, execColor, execWarn };
+        return { memberName, teamName, s, lap, acqR, execR, acqColor, execColor, execWarn };
+    });
+    // チーム→名前順でソート
+    memberRows.sort((a, b) => {
+        if (a.teamName !== b.teamName) return a.teamName.localeCompare(b.teamName);
+        return a.memberName.localeCompare(b.memberName);
     });
 
     // 合計行の計算
     const totals = {
-        appoTarget: teamRows.reduce((s, r) => s + r.s.appoTarget, 0),
-        appoAmount: teamRows.reduce((s, r) => s + r.s.appoAmount, 0),
-        execTarget: teamRows.reduce((s, r) => s + r.s.execTarget, 0),
-        execAmount: teamRows.reduce((s, r) => s + r.s.execAmount, 0),
-        execUnconfirmed: teamRows.reduce((s, r) => s + r.s.execUnconfirmedAmount, 0),
-        currentMonthExec: teamRows.reduce((s, r) => s + r.s.currentMonthExecAmount, 0),
-        prevMonthExec: teamRows.reduce((s, r) => s + r.s.prevMonthExecAmount, 0),
+        appoTarget: memberRows.reduce((s, r) => s + r.s.appoTarget, 0),
+        appoAmount: memberRows.reduce((s, r) => s + r.s.appoAmount, 0),
+        execTarget: memberRows.reduce((s, r) => s + r.s.execTarget, 0),
+        execAmount: memberRows.reduce((s, r) => s + r.s.execAmount, 0),
+        execUnconfirmed: memberRows.reduce((s, r) => s + r.s.execUnconfirmedAmount, 0),
+        currentMonthExec: memberRows.reduce((s, r) => s + r.s.currentMonthExecAmount, 0),
+        prevMonthExec: memberRows.reduce((s, r) => s + r.s.prevMonthExecAmount, 0),
     };
     const totalLap = totalDays > 0 ? Math.round(totals.appoTarget * (elapsed / totalDays)) : 0;
     const totalAcqR = totals.appoTarget > 0 ? Math.round(totals.appoAmount / totals.appoTarget * 1000) / 10 : 0;
@@ -1040,7 +1076,7 @@ function renderMorning(filter) {
         <table class="morning-compare-table">
             <thead>
                 <tr>
-                    <th>チーム</th>
+                    <th>メンバー</th>
                     <th class="text-right">取得目標</th>
                     <th class="text-right">ラップ</th>
                     <th class="text-right">取得実績</th>
@@ -1055,10 +1091,10 @@ function renderMorning(filter) {
             </thead>
             <tbody>`;
 
-    teamRows.forEach(r => {
+    memberRows.forEach(r => {
         tableHtml += `
                 <tr>
-                    <td class="morning-team-cell">${escapeHtml(r.teamName.replace('Team', ''))}<span class="morning-member-count">${r.s.memberCount}名</span></td>
+                    <td class="morning-team-cell">${escapeHtml(displayName(r.memberName))}</td>
                     <td class="text-right">¥${r.s.appoTarget.toLocaleString()}</td>
                     <td class="text-right" style="color:var(--text-light);">¥${r.lap.toLocaleString()}</td>
                     <td class="text-right" style="font-weight:700;">¥${r.s.appoAmount.toLocaleString()}</td>
@@ -1106,9 +1142,6 @@ function renderMorning(filter) {
     </div>`;
 
     document.getElementById('morningTeamCards').innerHTML = tableHtml;
-
-    // 日別目論見金額テーブル
-    renderMorningDailyAmount(ym);
 
     // 日次推移グラフ
     renderMorningLineSection(ym);
