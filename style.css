@@ -2705,6 +2705,41 @@ select option:hover {
 .dw-cal-input:focus { outline:none; border-color:#1155cc; box-shadow:0 0 0 2px rgba(17,85,204,0.15); }
 .dw-cal-holiday { font-size:0.7rem; color:#e04f24; }
 
+/* ========== 朝礼: 月別カレンダー ========== */
+.mrn-cal-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+.mrn-cal-row.single { grid-template-columns:1fr; }
+.mrn-cal-card { background:#fff; border:1px solid #e2e5ea; border-radius:10px; padding:16px; }
+.mrn-cal-card-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.mrn-cal-card-title-wrap { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.mrn-cal-card-title { font-weight:700; font-size:0.95rem; color:#222; }
+.mrn-cal-card-loading { font-size:0.78rem; color:#9aa3b2; }
+.mrn-cal-nav { display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; }
+.mrn-cal-nav-btn { background:#f3f5f8; border:1px solid #e2e5ea; border-radius:5px; width:24px; height:24px; padding:0; line-height:1; font-size:0.7rem; color:#5b6473; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
+.mrn-cal-nav-btn:hover { background:#e7eaf0; color:#1155cc; }
+.mrn-cal-nav-label { font-weight:600; color:#444; min-width:60px; text-align:center; }
+.mrn-cal-card-meta { font-size:0.78rem; color:#6b7280; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.mrn-cal-card-meta .meta-strong { color:#222; font-weight:600; }
+.mrn-cal-card-meta .meta-good { color:#1155cc; font-weight:700; }
+.mrn-cal-card-meta .meta-bad { color:#ef4444; font-weight:700; }
+.mrn-cal-controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; font-size:0.8rem; }
+.mrn-cal-controls label { font-weight:500; }
+.mrn-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; background:#e7eaf0; border:1px solid #e7eaf0; border-radius:6px; overflow:hidden; }
+.mrn-cal-day-label { background:#f3f5f8; text-align:center; padding:6px 0; font-size:0.72rem; font-weight:600; color:#5b6473; }
+.mrn-cal-day-label.sun { color:#e04f24; }
+.mrn-cal-day-label.sat { color:#1155cc; }
+.mrn-cal-cell { background:#fff; min-height:54px; padding:4px 6px; display:flex; flex-direction:column; justify-content:space-between; font-size:0.75rem; }
+.mrn-cal-cell.empty { background:#f8f9fb; }
+.mrn-cal-cell.weekend { background:#fafbfd; }
+.mrn-cal-cell.holiday { background:#fff5f0; }
+.mrn-cal-cell.today { box-shadow:inset 0 0 0 2px #1155cc; }
+.mrn-cal-cell .mrn-cal-date { font-size:0.7rem; color:#888; font-weight:600; }
+.mrn-cal-cell.weekend .mrn-cal-date { color:#9aa3b2; }
+.mrn-cal-cell .mrn-cal-date.sun { color:#e04f24; }
+.mrn-cal-cell .mrn-cal-date.sat { color:#1155cc; }
+.mrn-cal-cell .mrn-cal-value { font-size:0.78rem; font-weight:700; color:#1155cc; text-align:right; line-height:1.1; word-break:break-all; }
+.mrn-cal-cell.weak .mrn-cal-value { color:#9aa3b2; font-weight:500; }
+.mrn-cal-cell .mrn-cal-value.muted { color:#9aa3b2; font-weight:500; }
+
 /* ========== 印刷 ========== */
 @media print {
     .sidebar, .top-header, .filter-section, .refresh-btn { display: none !important; }

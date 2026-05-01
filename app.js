@@ -917,6 +917,198 @@ function initTodayTooltips() {
 // ==================== Tab: 朝礼 ====================
 let mrnPeriod = 'month';
 
+// 朝礼: 月別データキャッシュ（他月閲覧時に取得して保持）
+window.mrnMonthCache = window.mrnMonthCache || {};
+
+async function getMrnMonthData(ym) {
+    const currentYm = document.getElementById('filterMonth').value;
+    if (ym === currentYm) {
+        return {
+            performance: performanceData,
+            appointments: appointmentsData,
+            execution: executionAppoData
+        };
+    }
+    if (window.mrnMonthCache[ym]) return window.mrnMonthCache[ym];
+    const startDate = ym + '-01';
+    const endDate = getEndOfMonth(ym);
+    const [perf, appo, exec] = await Promise.all([
+        queryTurso("SELECT * FROM performance_rawdata WHERE input_date >= ? AND input_date <= ? ORDER BY input_date", [startDate, endDate]),
+        queryTurso("SELECT * FROM appointments WHERE acquisition_date >= ? AND acquisition_date <= ? ORDER BY acquisition_date", [startDate, endDate]),
+        queryTurso("SELECT * FROM appointments WHERE scheduled_date >= ? AND scheduled_date <= ? ORDER BY scheduled_date", [startDate, endDate])
+    ]);
+    normalizeDataMemberNames(perf); normalizeDataMemberNames(appo); normalizeDataMemberNames(exec);
+    const data = {
+        performance: deduplicatePerformance(perf),
+        appointments: deduplicateAppointments(appo),
+        execution: deduplicateAppointments(exec)
+    };
+    window.mrnMonthCache[ym] = data;
+    return data;
+}
+
+function shiftYm(ym, delta) {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+function buildMrnNavHeader(ym, navHandler) {
+    return `<div class="mrn-cal-nav">
+        <button class="mrn-cal-nav-btn" data-nav="prev" onclick="${navHandler}('${shiftYm(ym, -1)}')">◀</button>
+        <span class="mrn-cal-nav-label">${ym}</span>
+        <button class="mrn-cal-nav-btn" data-nav="next" onclick="${navHandler}('${shiftYm(ym, 1)}')">▶</button>
+    </div>`;
+}
+
+// 取得金額カード描画
+async function renderMrnAcqCard(ym) {
+    const card = document.getElementById('mrnAcqCard');
+    if (!card) return;
+    card.dataset.month = ym;
+    card.innerHTML = `<div class="mrn-cal-card-header"><div class="mrn-cal-card-title">取得金額</div><div class="mrn-cal-card-loading">読み込み中…</div></div>`;
+    const data = await getMrnMonthData(ym);
+    const excluded = getExcludedMembers(ym);
+    const totalTarget = getTarget('total', 'all', ym);
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
+    const { elapsed, total: totalDays } = getBusinessDays(ym);
+    const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
+    const acqDailyMap = {};
+    let acquisitionAmount = 0;
+    data.appointments.filter(a => !excluded.includes(a.member_name) && a.acquisition_date && a.acquisition_date.startsWith(ym)).forEach(a => {
+        const amt = parseFloat(a.amount) || 0;
+        acqDailyMap[a.acquisition_date] = (acqDailyMap[a.acquisition_date] || 0) + amt;
+        acquisitionAmount += amt;
+    });
+    const acqRate = monthlyTarget > 0 ? Math.round(acquisitionAmount / monthlyTarget * 1000) / 10 : 0;
+    const acqRateColor = acqRate >= standardProgress ? 'meta-good' : 'meta-bad';
+    const fmtYen = v => '¥' + Math.round(v).toLocaleString();
+    const calHtml = buildMonthlyCalendarHtml(ym, ds => acqDailyMap[ds] || null, fmtYen);
+    card.innerHTML = `
+        <div class="mrn-cal-card-header">
+            <div class="mrn-cal-card-title-wrap">
+                <div class="mrn-cal-card-title">取得金額</div>
+                ${buildMrnNavHeader(ym, 'renderMrnAcqCard')}
+            </div>
+            <div class="mrn-cal-card-meta">
+                <span>目標 <span class="meta-strong">¥${monthlyTarget.toLocaleString()}</span></span>
+                <span>実績 <span class="meta-strong">¥${acquisitionAmount.toLocaleString()}</span></span>
+                <span class="${acqRateColor}">${acqRate}%</span>
+            </div>
+        </div>
+        ${calHtml}
+    `;
+}
+
+// 着地ヨミカード描画
+async function renderMrnYomiCard(ym) {
+    const card = document.getElementById('mrnYomiCard');
+    if (!card) return;
+    card.dataset.month = ym;
+    card.innerHTML = `<div class="mrn-cal-card-header"><div class="mrn-cal-card-title">着地ヨミ</div><div class="mrn-cal-card-loading">読み込み中…</div></div>`;
+    const data = await getMrnMonthData(ym);
+    const excluded = getExcludedMembers(ym);
+    const totalTarget = getTarget('total', 'all', ym);
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
+    const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
+    const RESKED = 0.15;
+    let execConfirmed = 0;
+    let execUnconfirmed = 0;
+    const yomiDailyMap = {};
+    data.execution.filter(a => !excluded.includes(a.member_name) && a.scheduled_date && a.scheduled_date.startsWith(ym)).forEach(a => {
+        const amt = parseFloat(a.amount) || 0;
+        if (a.status === '実施') {
+            execConfirmed += amt;
+            yomiDailyMap[a.scheduled_date] = (yomiDailyMap[a.scheduled_date] || 0) + amt;
+        } else if (a.status === '未確認') {
+            execUnconfirmed += amt;
+            yomiDailyMap[a.scheduled_date] = (yomiDailyMap[a.scheduled_date] || 0) + Math.round(amt * (1 - RESKED));
+        }
+    });
+    const execForecast = execConfirmed + Math.round(execUnconfirmed * (1 - RESKED));
+    const forecastDiff = execForecast - executionTarget;
+    const fcColor = forecastDiff >= 0 ? '#1155cc' : '#ef4444';
+    const fmtYen = v => '¥' + Math.round(v).toLocaleString();
+    const calHtml = buildMonthlyCalendarHtml(ym, ds => yomiDailyMap[ds] || null, fmtYen);
+    card.innerHTML = `
+        <div class="mrn-cal-card-header">
+            <div class="mrn-cal-card-title-wrap">
+                <div class="mrn-cal-card-title">着地ヨミ <span style="font-size:0.7rem;color:var(--text-light);font-weight:500;margin-left:4px;">85%換算</span></div>
+                ${buildMrnNavHeader(ym, 'renderMrnYomiCard')}
+            </div>
+            <div class="mrn-cal-card-meta">
+                <span>着地 <span class="meta-strong" style="color:${fcColor};">¥${execForecast.toLocaleString()}</span></span>
+                <span>確定 ¥${execConfirmed.toLocaleString()}</span>
+                <span>未確認 ¥${execUnconfirmed.toLocaleString()}</span>
+                <span style="color:${fcColor};font-weight:700;">${forecastDiff >= 0 ? '+' : ''}¥${forecastDiff.toLocaleString()}</span>
+            </div>
+        </div>
+        ${calHtml}
+    `;
+}
+
+// 月別カレンダーグリッドを文字列で構築
+// dailyValueFn(ymd) → number | null
+// formatFn(value) → 表示用文字列（null は空セル）
+function buildMonthlyCalendarHtml(ym, dailyValueFn, formatFn) {
+    var parts = ym.split('-');
+    var year = parseInt(parts[0]);
+    var month = parseInt(parts[1]);
+    var lastDay = new Date(year, month, 0).getDate();
+    var firstDow = new Date(year, month - 1, 1).getDay(); // 0=日
+
+    var todayStr = (function() {
+        var d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    })();
+
+    var html = '<div class="mrn-cal-grid">';
+    var dowLabels = ['日', '月', '火', '水', '木', '金', '土'];
+    dowLabels.forEach(function(lbl, i) {
+        var cls = i === 0 ? 'sun' : i === 6 ? 'sat' : '';
+        html += '<div class="mrn-cal-day-label ' + cls + '">' + lbl + '</div>';
+    });
+    // 月初までの空セル
+    for (var i = 0; i < firstDow; i++) {
+        html += '<div class="mrn-cal-cell empty"></div>';
+    }
+    for (var d = 1; d <= lastDay; d++) {
+        var ds = ym + '-' + String(d).padStart(2, '0');
+        var dt = new Date(year, month - 1, d);
+        var dow = dt.getDay();
+        var isWeekend = (dow === 0 || dow === 6);
+        var isHoliday = holidaysSet && holidaysSet.has(ds);
+        var isToday = ds === todayStr;
+        var classes = ['mrn-cal-cell'];
+        if (isWeekend) classes.push('weekend');
+        if (isHoliday) classes.push('holiday');
+        if (isToday) classes.push('today');
+
+        var val = (isWeekend || isHoliday) ? null : dailyValueFn(ds);
+        var dateClass = dow === 0 ? 'sun' : dow === 6 ? 'sat' : '';
+        var valHtml = '';
+        if (val === null || val === undefined) {
+            valHtml = '<div class="mrn-cal-value muted">-</div>';
+        } else if (val === 0) {
+            valHtml = '<div class="mrn-cal-value muted">' + formatFn(0) + '</div>';
+        } else {
+            valHtml = '<div class="mrn-cal-value">' + formatFn(val) + '</div>';
+        }
+        html += '<div class="' + classes.join(' ') + '">'
+              + '<div class="mrn-cal-date ' + dateClass + '">' + d + '</div>'
+              + valHtml
+              + '</div>';
+    }
+    // 月末以降の空セル（行整列）
+    var totalCells = firstDow + lastDay;
+    var trailing = (7 - (totalCells % 7)) % 7;
+    for (var t = 0; t < trailing; t++) {
+        html += '<div class="mrn-cal-cell empty"></div>';
+    }
+    html += '</div>';
+    return html;
+}
+
 function switchMrnPeriod(period) {
     mrnPeriod = period;
     document.querySelectorAll('.mrn-period-btn').forEach(function(b) {
@@ -988,32 +1180,14 @@ function renderMorning(filter) {
     const forecastDiffMrn = execForecastMrn - periodExecTarget;
     const forecastColorMrn = forecastDiffMrn >= 0 ? '#86aaec' : '#ef947a';
 
-    // KPIカード（経営タブと同じゲージスタイル + 期間切替）
     document.getElementById('morningKpiBar').innerHTML = `
-        <div class="mgmt-period-bar">
-            <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'day' ? 'active' : ''}" data-period="day" onclick="switchMrnPeriod('day')">日別</button>
-            <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'week' ? 'active' : ''}" data-period="week" onclick="switchMrnPeriod('week')">週別</button>
-            <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'month' ? 'active' : ''}" data-period="month" onclick="switchMrnPeriod('month')">月別</button>
-            <span class="mgmt-period-label">${periodLabels[mrnPeriod]}表示</span>
-        </div>
-        <div class="mgmt-top-cards">
-            <div class="mgmt-gauge-card">
-                <div class="mgmt-gauge-title">取得金額</div>
-                <div class="mgmt-gauge-wrap"><canvas id="mrnGaugeAcq"></canvas></div>
-                <div class="mgmt-gauge-footer">目標 ¥${periodTarget.toLocaleString()}</div>
-            </div>
-            <div class="mgmt-gauge-card mgmt-yomi-card">
-                <div class="mgmt-gauge-title">着地ヨミ<span style="font-size:0.7rem;color:var(--text-light);margin-left:6px;">85%換算</span></div>
-                <div class="mgmt-yomi-value" style="color:${forecastColorMrn};">¥${execForecastMrn.toLocaleString()}</div>
-                <div class="mgmt-yomi-sub">確定 ¥${execConfirmed.toLocaleString()} ＋ 未確認 ¥${execUnconfirmed.toLocaleString()} × 85%</div>
-                <div class="mgmt-yomi-diff" style="color:${forecastColorMrn};">目標比 ${forecastDiffMrn >= 0 ? '+' : ''}¥${forecastDiffMrn.toLocaleString()}</div>
-            </div>
+        <div class="mrn-cal-row">
+            <div class="mrn-cal-card" id="mrnAcqCard"></div>
+            <div class="mrn-cal-card" id="mrnYomiCard"></div>
         </div>
     `;
-
-    // ゲージチャート描画（朝礼用: charts に保存、destroyMgmtCharts の影響を受けない）
-    if (charts['mrnGaugeAcq']) { charts['mrnGaugeAcq'].destroy(); }
-    charts['mrnGaugeAcq'] = createGaugeChart('mrnGaugeAcq', acquisitionAmount, periodTarget, standardProgress, '取得金額', '達成率 ' + acqRate + '%');
+    renderMrnAcqCard(ym);
+    renderMrnYomiCard(ym);
 
     // アラート
     const alerts = [];
@@ -1451,88 +1625,66 @@ function renderMorningLineSection(ym) {
     if (!section) return;
 
     section.textContent = '';
-
-    // タイトル行
-    var titleDiv = document.createElement('div');
-    titleDiv.className = 'section-title';
-    titleDiv.style.marginTop = '24px';
-    titleDiv.textContent = '日次推移 ';
-
-    var controls = document.createElement('span');
-    controls.style.cssText = 'display:inline-flex;gap:8px;margin-left:12px;font-size:0.8rem;align-items:center;';
-
-    // 指標セレクト
-    var mLabel = document.createElement('label'); mLabel.style.fontWeight = '500'; mLabel.textContent = '指標';
-    var mSel = document.createElement('select'); mSel.id = 'mrnLineMetric';
-    mSel.onchange = function() { renderMorningLineChart(ym); };
-    MRN_LINE_METRICS.forEach(function(m) {
-        var opt = document.createElement('option'); opt.value = m.key; opt.textContent = m.label;
-        mSel.appendChild(opt);
-    });
-
-    // メンバーセレクト
-    var memLabel = document.createElement('label'); memLabel.style.fontWeight = '500'; memLabel.textContent = 'メンバー';
-    var memSel = document.createElement('select'); memSel.id = 'mrnLineMember';
-    memSel.onchange = function() { renderMorningLineChart(ym); };
-    var optAll = document.createElement('option'); optAll.value = 'all'; optAll.textContent = '全体';
-    memSel.appendChild(optAll);
-
-    var excluded = getExcludedMembers(ym);
-    var activeMembers = membersData.filter(function(m) { return m.status === 'active' && !excluded.includes(m.member_name); });
-    var memberTeamMap = getTeamsForMonth(ym);
-    activeMembers.filter(function(m) {
-        var team = memberTeamMap[m.member_name];
-        return team && team !== '未所属';
-    }).forEach(function(m) {
-        var opt = document.createElement('option'); opt.value = m.member_name; opt.textContent = displayName(m.member_name);
-        memSel.appendChild(opt);
-    });
-
-    controls.appendChild(mLabel); controls.appendChild(mSel);
-    controls.appendChild(memLabel); controls.appendChild(memSel);
-    titleDiv.appendChild(controls);
-    section.appendChild(titleDiv);
-
-    // チャートコンテナ
-    var chartWrap = document.createElement('div');
-    chartWrap.className = 'mgmt-chart-container';
-    chartWrap.style.height = '300px';
-    var canvas = document.createElement('canvas');
-    canvas.id = 'mrnLineChart';
-    chartWrap.appendChild(canvas);
-    section.appendChild(chartWrap);
-
-    renderMorningLineChart(ym);
-    initCustomSelects();
+    var card = document.createElement('div');
+    card.className = 'mrn-cal-card';
+    card.id = 'mrnLineCard';
+    card.style.marginTop = '8px';
+    card.dataset.month = ym;
+    section.appendChild(card);
+    renderMorningLineCalendar(ym);
 }
 
-function renderMorningLineChart(ym) {
-    if (charts['mrnLine']) { charts['mrnLine'].destroy(); }
-    var ctx = document.getElementById('mrnLineChart');
-    if (!ctx) return;
+async function renderMorningLineCalendar(ym) {
+    var card = document.getElementById('mrnLineCard');
+    if (!card) return;
 
-    var metricKey = document.getElementById('mrnLineMetric')?.value || 'calls';
-    var memberFilter = document.getElementById('mrnLineMember')?.value || 'all';
+    // 既存セレクト値を保持
+    var prevMetric = document.getElementById('mrnLineMetric')?.value || 'calls';
+    var prevMember = document.getElementById('mrnLineMember')?.value || 'all';
+
+    card.dataset.month = ym;
+    card.innerHTML = `<div class="mrn-cal-card-header"><div class="mrn-cal-card-title">日次推移</div><div class="mrn-cal-card-loading">読み込み中…</div></div>`;
+
+    var data = await getMrnMonthData(ym);
+
+    // ヘッダ + コントロール構築
+    var memberOpts = '<option value="all">全体</option>';
+    var excluded = getExcludedMembers(ym);
+    var memberTeamMap = getTeamsForMonth(ym);
+    membersData.filter(function(m) {
+        return m.status === 'active' && !excluded.includes(m.member_name) && memberTeamMap[m.member_name] && memberTeamMap[m.member_name] !== '未所属';
+    }).forEach(function(m) {
+        memberOpts += `<option value="${m.member_name}"${m.member_name === prevMember ? ' selected' : ''}>${displayName(m.member_name)}</option>`;
+    });
+
+    var metricOpts = MRN_LINE_METRICS.map(function(metric) {
+        return `<option value="${metric.key}"${metric.key === prevMetric ? ' selected' : ''}>${metric.label}</option>`;
+    }).join('');
+
+    card.innerHTML = `
+        <div class="mrn-cal-card-header">
+            <div class="mrn-cal-card-title-wrap">
+                <div class="mrn-cal-card-title">日次推移</div>
+                ${buildMrnNavHeader(ym, 'renderMorningLineCalendar')}
+            </div>
+            <div class="mrn-cal-controls">
+                <label>指標</label>
+                <select id="mrnLineMetric" onchange="renderMorningLineCalendar('${ym}')">${metricOpts}</select>
+                <label>メンバー</label>
+                <select id="mrnLineMember" onchange="renderMorningLineCalendar('${ym}')">${memberOpts}</select>
+            </div>
+        </div>
+        <div id="mrnLineCalendar"></div>
+    `;
+
+    var metricKey = document.getElementById('mrnLineMetric').value;
+    var memberFilter = document.getElementById('mrnLineMember').value;
     var metric = MRN_LINE_METRICS.find(function(m) { return m.key === metricKey; });
     if (!metric) return;
 
-    // 当月の日付一覧（1日〜末日）
-    var parts = ym.split('-');
-    var year = parseInt(parts[0]);
-    var month = parseInt(parts[1]);
-    var lastDay = new Date(year, month, 0).getDate();
-    var dates = [];
-    for (var d = 1; d <= lastDay; d++) {
-        var ds = ym + '-' + String(d).padStart(2, '0');
-        // 土日・祝日を除外
-        var dt = new Date(year, month - 1, d);
-        if (dt.getDay() === 0 || dt.getDay() === 6) continue;
-        if (holidaysSet.has(ds)) continue;
-        dates.push(ds);
-    }
-
-    // データ集計
-    var filtered = performanceData;
+    var filtered = data.performance.filter(function(r) {
+        return r.input_date && r.input_date.startsWith(ym);
+    });
     if (memberFilter !== 'all') {
         filtered = filtered.filter(function(r) { return r.member_name === memberFilter; });
     }
@@ -1547,72 +1699,27 @@ function renderMorningLineChart(ym) {
     } else {
         filtered.forEach(function(r) {
             if (!dailyMap[r.input_date]) dailyMap[r.input_date] = 0;
-            var val = parseFloat(r[metric.field]) || 0;
-            dailyMap[r.input_date] += val;
+            dailyMap[r.input_date] += parseFloat(r[metric.field]) || 0;
         });
     }
 
-    var labels = dates.map(function(ds) { return parseInt(ds.split('-')[2]) + '日'; });
-    var data = dates.map(function(ds) {
+    var valueFn = function(ds) {
         if (metric.isRate) {
             var d = dailyMap[ds];
             if (!d || d.den === 0) return null;
             return Math.round(d.num / d.den * 1000) / 10;
         }
-        return dailyMap[ds] || 0;
-    });
+        return dailyMap[ds] || null;
+    };
 
-    // 色
-    var lineColor = '#1155cc';
-    var bgColor = 'rgba(17, 85, 204, 0.1)';
+    var formatFn = function(v) {
+        if (metric.isRate) return v.toFixed(1) + '%';
+        if (metricKey === 'amount') return '¥' + Math.round(v).toLocaleString();
+        if (metricKey === 'hours') return v.toFixed(1) + 'h';
+        return v.toLocaleString();
+    };
 
-    charts['mrnLine'] = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: metric.label + (memberFilter !== 'all' ? '（' + displayName(memberFilter) + '）' : '（全体）'),
-                data: data,
-                borderColor: lineColor,
-                backgroundColor: bgColor,
-                fill: true,
-                tension: 0.3,
-                pointRadius: 3,
-                pointBackgroundColor: lineColor,
-                borderWidth: 2
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    grid: { color: '#f0f0f0' },
-                    ticks: {
-                        font: { size: 10 },
-                        callback: function(value) { return metric.isRate ? value + '%' : value; }
-                    }
-                },
-                x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 0 } }
-            },
-            plugins: {
-                legend: { labels: { font: { size: 11 } } },
-                tooltip: {
-                    callbacks: {
-                        label: function(tipCtx) {
-                            var v = tipCtx.raw;
-                            if (v === null || v === undefined) return '-';
-                            if (metric.isRate) return v.toFixed(1) + '%';
-                            if (metricKey === 'amount') return '¥' + v.toLocaleString();
-                            if (metricKey === 'hours') return v.toFixed(1) + 'h';
-                            return v.toLocaleString();
-                        }
-                    }
-                }
-            }
-        }
-    });
+    document.getElementById('mrnLineCalendar').innerHTML = buildMonthlyCalendarHtml(ym, valueFn, formatFn);
 }
 
 // ==================== Tab: 経営 ====================
