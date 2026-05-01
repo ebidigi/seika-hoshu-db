@@ -1441,6 +1441,9 @@ const MRN_LINE_METRICS = [
     { key: 'amount', label: '取得金額', field: 'appointment_amount' },
     { key: 'pr', label: '着電数', field: 'pr_count' },
     { key: 'hours', label: '架電時間', field: 'call_hours' },
+    { key: 'callToPr', label: '架電to着電率', isRate: true, numerator: 'pr_count', denominator: 'call_count' },
+    { key: 'callToAppo', label: '架電toアポ率', isRate: true, numerator: 'appointment_count', denominator: 'call_count' },
+    { key: 'prToAppo', label: '着電toアポ率', isRate: true, numerator: 'appointment_count', denominator: 'pr_count' },
 ];
 
 function renderMorningLineSection(ym) {
@@ -1535,14 +1538,29 @@ function renderMorningLineChart(ym) {
     }
 
     var dailyMap = {};
-    filtered.forEach(function(r) {
-        if (!dailyMap[r.input_date]) dailyMap[r.input_date] = 0;
-        var val = parseFloat(r[metric.field]) || 0;
-        dailyMap[r.input_date] += val;
-    });
+    if (metric.isRate) {
+        filtered.forEach(function(r) {
+            if (!dailyMap[r.input_date]) dailyMap[r.input_date] = { num: 0, den: 0 };
+            dailyMap[r.input_date].num += parseFloat(r[metric.numerator]) || 0;
+            dailyMap[r.input_date].den += parseFloat(r[metric.denominator]) || 0;
+        });
+    } else {
+        filtered.forEach(function(r) {
+            if (!dailyMap[r.input_date]) dailyMap[r.input_date] = 0;
+            var val = parseFloat(r[metric.field]) || 0;
+            dailyMap[r.input_date] += val;
+        });
+    }
 
     var labels = dates.map(function(ds) { return parseInt(ds.split('-')[2]) + '日'; });
-    var data = dates.map(function(ds) { return dailyMap[ds] || 0; });
+    var data = dates.map(function(ds) {
+        if (metric.isRate) {
+            var d = dailyMap[ds];
+            if (!d || d.den === 0) return null;
+            return Math.round(d.num / d.den * 1000) / 10;
+        }
+        return dailyMap[ds] || 0;
+    });
 
     // 色
     var lineColor = '#1155cc';
@@ -1568,7 +1586,14 @@ function renderMorningLineChart(ym) {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { font: { size: 10 } } },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: '#f0f0f0' },
+                    ticks: {
+                        font: { size: 10 },
+                        callback: function(value) { return metric.isRate ? value + '%' : value; }
+                    }
+                },
                 x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 0 } }
             },
             plugins: {
@@ -1577,6 +1602,8 @@ function renderMorningLineChart(ym) {
                     callbacks: {
                         label: function(tipCtx) {
                             var v = tipCtx.raw;
+                            if (v === null || v === undefined) return '-';
+                            if (metric.isRate) return v.toFixed(1) + '%';
                             if (metricKey === 'amount') return '¥' + v.toLocaleString();
                             if (metricKey === 'hours') return v.toFixed(1) + 'h';
                             return v.toLocaleString();
