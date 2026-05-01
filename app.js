@@ -455,10 +455,15 @@ function computeTeamStats(teamName, ym) {
 }
 
 // ==================== メンバー個別統計集計 ====================
-function computeMemberStats(memberName, ym) {
-    const perf = performanceData.filter(d => d.member_name === memberName);
-    const appo = appointmentsData.filter(d => d.member_name === memberName);
-    const execAppo = executionAppoData.filter(d => d.member_name === memberName);
+function computeMemberStats(memberName, ym, range) {
+    let perf = performanceData.filter(d => d.member_name === memberName);
+    let appo = appointmentsData.filter(d => d.member_name === memberName);
+    let execAppo = executionAppoData.filter(d => d.member_name === memberName);
+    if (range) {
+        perf = perf.filter(d => d.input_date >= range.start && d.input_date <= range.end);
+        appo = appo.filter(d => d.acquisition_date >= range.start && d.acquisition_date <= range.end);
+        execAppo = execAppo.filter(d => d.scheduled_date >= range.start && d.scheduled_date <= range.end);
+    }
 
     const callCount = sum(perf, 'call_count');
     const prCount = sum(perf, 'pr_count');
@@ -917,7 +922,248 @@ function initTodayTooltips() {
 // ==================== Tab: 朝礼 ====================
 let mrnPeriod = 'month';
 
+// 朝礼用 期間ピッカーの状態
+const mrnDatePickerState = {
+    mode: 'single',
+    single: null,
+    rangeStart: null,
+    rangeEnd: null,
+    popoverMonth: null,
+    popoverPickStep: 'start',
+    activeInput: null
+};
+
+function fmtYmdLocal(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function parseYmd(s) {
+    if (!s) return null;
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d);
+}
+
+function shiftYmMrn(ym, delta) {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+function setMrnPickerMode(mode) {
+    mrnDatePickerState.mode = mode;
+    if (mode === 'single') {
+        mrnDatePickerState.rangeStart = null;
+        mrnDatePickerState.rangeEnd = null;
+    } else {
+        mrnDatePickerState.single = null;
+    }
+    renderMrnPickerBar();
+}
+
+function openMrnPickerPopover(which) {
+    mrnDatePickerState.activeInput = which;
+    const st = mrnDatePickerState;
+    const ref = which === 'end' ? st.rangeEnd : (which === 'start' ? st.rangeStart : st.single);
+    const refDate = ref ? parseYmd(ref) : new Date();
+    st.popoverMonth = refDate.getFullYear() + '-' + String(refDate.getMonth() + 1).padStart(2, '0');
+    if (st.mode === 'range') {
+        st.popoverPickStep = which === 'end' ? 'end' : 'start';
+    }
+    renderMrnPickerPopover();
+    document.getElementById('mrnPickerPopover').classList.add('open');
+}
+
+function closeMrnPickerPopover() {
+    const pop = document.getElementById('mrnPickerPopover');
+    if (pop) pop.classList.remove('open');
+    mrnDatePickerState.activeInput = null;
+}
+
+function shiftPopoverMonth(delta) {
+    mrnDatePickerState.popoverMonth = shiftYmMrn(mrnDatePickerState.popoverMonth, delta);
+    renderMrnPickerPopover();
+}
+
+function selectMrnPickerDay(ymd) {
+    const st = mrnDatePickerState;
+    if (st.mode === 'single') {
+        st.single = ymd;
+        mrnPeriod = 'day';
+        closeMrnPickerPopover();
+        renderMrnPickerBar();
+        applyMrnPicker();
+        return;
+    }
+    if (st.popoverPickStep === 'start' || !st.rangeStart || (st.rangeStart && st.rangeEnd)) {
+        st.rangeStart = ymd;
+        st.rangeEnd = null;
+        st.popoverPickStep = 'end';
+    } else {
+        if (parseYmd(ymd) < parseYmd(st.rangeStart)) {
+            st.rangeEnd = st.rangeStart;
+            st.rangeStart = ymd;
+        } else {
+            st.rangeEnd = ymd;
+        }
+        mrnPeriod = 'custom';
+        closeMrnPickerPopover();
+        renderMrnPickerBar();
+        applyMrnPicker();
+        return;
+    }
+    renderMrnPickerBar();
+    if (st.activeInput) renderMrnPickerPopover();
+}
+
+function clearMrnPicker() {
+    mrnDatePickerState.single = null;
+    mrnDatePickerState.rangeStart = null;
+    mrnDatePickerState.rangeEnd = null;
+    mrnPeriod = 'month';
+    closeMrnPickerPopover();
+    renderMrnPickerBar();
+    applyMrnPicker();
+}
+
+function setMrnPickerToday() {
+    selectMrnPickerDay(fmtYmdLocal(new Date()));
+}
+
+async function applyMrnPicker() {
+    const st = mrnDatePickerState;
+    let targetMonth = null;
+    if (st.mode === 'single' && st.single) targetMonth = st.single.slice(0, 7);
+    else if (st.mode === 'range' && st.rangeStart) targetMonth = st.rangeStart.slice(0, 7);
+
+    const filterMonth = document.getElementById('filterMonth');
+    if (targetMonth && filterMonth.value !== targetMonth) {
+        filterMonth.value = targetMonth;
+        await loadMonthData();
+    }
+    renderMorning({ month: filterMonth.value });
+}
+
+function renderMrnPickerBar() {
+    const bar = document.getElementById('mrnPickerBar');
+    if (!bar) return;
+    const st = mrnDatePickerState;
+    let inputsHtml;
+    if (st.mode === 'single') {
+        inputsHtml = `
+            <div class="mrn-picker-input-wrap">
+                <input type="text" class="mrn-picker-input" readonly value="${st.single || ''}" placeholder="YYYY-MM-DD" onclick="openMrnPickerPopover('single')">
+                <span class="mrn-picker-icon">📅</span>
+            </div>
+        `;
+    } else {
+        inputsHtml = `
+            <div class="mrn-picker-input-wrap">
+                <input type="text" class="mrn-picker-input" readonly value="${st.rangeStart || ''}" placeholder="開始日" onclick="openMrnPickerPopover('start')">
+                <span class="mrn-picker-icon">📅</span>
+            </div>
+            <span class="mrn-picker-sep">〜</span>
+            <div class="mrn-picker-input-wrap">
+                <input type="text" class="mrn-picker-input" readonly value="${st.rangeEnd || ''}" placeholder="終了日" onclick="openMrnPickerPopover('end')">
+                <span class="mrn-picker-icon">📅</span>
+            </div>
+        `;
+    }
+    let summary = '';
+    if (st.mode === 'single' && st.single) summary = '対象: ' + st.single;
+    if (st.mode === 'range' && st.rangeStart && st.rangeEnd) summary = '期間: ' + st.rangeStart + ' 〜 ' + st.rangeEnd;
+    bar.innerHTML = `
+        <div class="mrn-picker-mode">
+            <button class="${st.mode === 'single' ? 'active' : ''}" onclick="setMrnPickerMode('single')">単日</button>
+            <button class="${st.mode === 'range' ? 'active' : ''}" onclick="setMrnPickerMode('range')">期間</button>
+        </div>
+        <div style="position:relative;display:inline-flex;align-items:center;gap:6px;">
+            ${inputsHtml}
+            <div id="mrnPickerPopover" class="mrn-picker-popover"></div>
+        </div>
+        <button class="mrn-picker-apply" onclick="applyMrnPicker()">適用</button>
+        <button class="mrn-picker-clear" onclick="clearMrnPicker()">クリア</button>
+        <span class="mrn-picker-summary">${summary}</span>
+    `;
+    const pop = document.getElementById('mrnPickerPopover');
+    if (pop) pop.onclick = function(e) { e.stopPropagation(); };
+}
+
+function renderMrnPickerPopover() {
+    const pop = document.getElementById('mrnPickerPopover');
+    if (!pop) return;
+    const st = mrnDatePickerState;
+    const ym = st.popoverMonth || (new Date()).getFullYear() + '-' + String((new Date()).getMonth() + 1).padStart(2, '0');
+    const [y, m] = ym.split('-').map(Number);
+    const monthLabel = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'][m - 1] + ' ' + y;
+    const firstDow = new Date(y, m - 1, 1).getDay();
+    const lastDay = new Date(y, m, 0).getDate();
+    const todayStr = fmtYmdLocal(new Date());
+
+    let html = '<div class="mrn-picker-pop-header">'
+        + '<div class="mrn-picker-pop-month">' + monthLabel + '</div>'
+        + '<div class="mrn-picker-pop-nav">'
+        + '<button onclick="shiftPopoverMonth(-1)">↑</button>'
+        + '<button onclick="shiftPopoverMonth(1)">↓</button>'
+        + '</div></div>';
+    html += '<div class="mrn-picker-pop-grid">';
+    const labels = ['日','月','火','水','木','金','土'];
+    labels.forEach(function(l, i) {
+        const cls = i === 0 ? 'sun' : i === 6 ? 'sat' : '';
+        html += '<div class="mrn-picker-pop-dlabel ' + cls + '">' + l + '</div>';
+    });
+    const prevYm = shiftYmMrn(ym, -1);
+    const [py, pm] = prevYm.split('-').map(Number);
+    const prevLast = new Date(py, pm, 0).getDate();
+    for (let i = firstDow - 1; i >= 0; i--) {
+        const d = prevLast - i;
+        const ds = prevYm + '-' + String(d).padStart(2, '0');
+        html += '<div class="mrn-picker-pop-day other" onclick="selectMrnPickerDay(\'' + ds + '\')">' + d + '</div>';
+    }
+    for (let d = 1; d <= lastDay; d++) {
+        const ds = ym + '-' + String(d).padStart(2, '0');
+        const cls = ['mrn-picker-pop-day'];
+        if (ds === todayStr) cls.push('today');
+        if (st.mode === 'single' && ds === st.single) cls.push('selected');
+        if (st.mode === 'range') {
+            if (ds === st.rangeStart) cls.push('range-start');
+            if (ds === st.rangeEnd) cls.push('range-end');
+            if (st.rangeStart && st.rangeEnd && ds > st.rangeStart && ds < st.rangeEnd) cls.push('in-range');
+        }
+        html += '<div class="' + cls.join(' ') + '" onclick="selectMrnPickerDay(\'' + ds + '\')">' + d + '</div>';
+    }
+    const totalCells = firstDow + lastDay;
+    const trailing = (7 - (totalCells % 7)) % 7;
+    const nextYm = shiftYmMrn(ym, 1);
+    for (let i = 1; i <= trailing; i++) {
+        const ds = nextYm + '-' + String(i).padStart(2, '0');
+        html += '<div class="mrn-picker-pop-day other" onclick="selectMrnPickerDay(\'' + ds + '\')">' + i + '</div>';
+    }
+    html += '</div>';
+    html += '<div class="mrn-picker-pop-footer">'
+        + '<button onclick="clearMrnPicker()">Clear</button>'
+        + '<button onclick="setMrnPickerToday()">Today</button>'
+        + '</div>';
+    pop.innerHTML = html;
+}
+
+document.addEventListener('click', function(e) {
+    const pop = document.getElementById('mrnPickerPopover');
+    if (!pop || !pop.classList.contains('open')) return;
+    if (pop.contains(e.target)) return;
+    if (e.target.closest('.mrn-picker-input-wrap')) return;
+    closeMrnPickerPopover();
+});
+
 function switchMrnPeriod(period) {
+    if (period === 'custom') {
+        // カスタム選択時はピッカー範囲モードに切替（実際の期間はピッカーで指定）
+        setMrnPickerMode('range');
+        return;
+    }
+    // 通常トグル: ピッカー状態をクリアしてピッカー優先を解除
+    mrnDatePickerState.single = null;
+    mrnDatePickerState.rangeStart = null;
+    mrnDatePickerState.rangeEnd = null;
     mrnPeriod = period;
     document.querySelectorAll('.mrn-period-btn').forEach(function(b) {
         b.classList.toggle('active', b.dataset.period === period);
@@ -927,6 +1173,7 @@ function switchMrnPeriod(period) {
 }
 
 function renderMorning(filter) {
+    renderMrnPickerBar();
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
     const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
@@ -961,7 +1208,7 @@ function renderMorning(filter) {
     document.getElementById('progressBadge').textContent = `標準進捗: ${standardProgress}%`;
     document.getElementById('dateInfo').textContent = `${ym} | 経過 ${elapsed}日 / 全${totalDays}営業日`;
 
-    const periodLabels = { day: '日別', week: '週別', month: '月別', quarter: 'Q別' };
+    const periodLabels = { day: '日別', week: '週別', month: '月別', quarter: 'Q別', custom: 'カスタム' };
 
     // 取得進捗
     const acqRate = periodTarget > 0 ? Math.round(acquisitionAmount / periodTarget * 1000) / 10 : 0;
@@ -994,7 +1241,8 @@ function renderMorning(filter) {
             <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'day' ? 'active' : ''}" data-period="day" onclick="switchMrnPeriod('day')">日別</button>
             <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'week' ? 'active' : ''}" data-period="week" onclick="switchMrnPeriod('week')">週別</button>
             <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'month' ? 'active' : ''}" data-period="month" onclick="switchMrnPeriod('month')">月別</button>
-            <span class="mgmt-period-label">${periodLabels[mrnPeriod]}表示</span>
+            <button class="mrn-period-btn mgmt-period-btn ${mrnPeriod === 'custom' ? 'active' : ''}" data-period="custom" onclick="switchMrnPeriod('custom')">カスタム</button>
+            <span class="mgmt-period-label">${periodLabels[mrnPeriod] || ''}表示</span>
         </div>
         <div class="mgmt-top-cards">
             <div class="mgmt-gauge-card">
@@ -1039,9 +1287,10 @@ function renderMorning(filter) {
             return t && t !== '未所属' && t !== '所属なし';
         });
 
+    const memberPickerRange = getMrnEffectiveRange(ym);
     const memberRows = memberNames.map(memberName => {
         const teamName = memberTeamMap[memberName];
-        const s = computeMemberStats(memberName, ym);
+        const s = computeMemberStats(memberName, ym, memberPickerRange);
         const lap = totalDays > 0 ? Math.round(s.appoTarget * (elapsed / totalDays)) : 0;
         const acqR = s.appoTarget > 0 ? Math.round(s.appoAmount / s.appoTarget * 1000) / 10 : 0;
         const execR = s.execTarget > 0 ? Math.round(s.execAmount / s.execTarget * 1000) / 10 : 0;
@@ -1299,7 +1548,27 @@ function fmtDateYMD(d) {
 }
 
 // 朝礼用: 期間フィルタ
+function getMrnEffectiveRange(ym) {
+    var st = mrnDatePickerState;
+    if (st.mode === 'single' && st.single) {
+        return { start: st.single, end: st.single, isCustom: true };
+    }
+    if (st.mode === 'range' && st.rangeStart && st.rangeEnd) {
+        return { start: st.rangeStart, end: st.rangeEnd, isCustom: true };
+    }
+    return null;
+}
+
 function filterByMrnPeriod(perfData, appoData, execData, ym) {
+    // ピッカー優先
+    var customRange = getMrnEffectiveRange(ym);
+    if (customRange) {
+        return {
+            perf: perfData.filter(function(d) { return d.input_date >= customRange.start && d.input_date <= customRange.end; }),
+            appo: appoData.filter(function(d) { return d.acquisition_date >= customRange.start && d.acquisition_date <= customRange.end; }),
+            exec: execData.filter(function(d) { return d.scheduled_date >= customRange.start && d.scheduled_date <= customRange.end; })
+        };
+    }
     if (mrnPeriod === 'month') return { perf: perfData, appo: appoData, exec: execData };
     var today = new Date();
     var startDate, endDate;
@@ -1516,23 +1785,34 @@ function renderMorningLineChart(ym) {
     var metric = MRN_LINE_METRICS.find(function(m) { return m.key === metricKey; });
     if (!metric) return;
 
-    // 当月の日付一覧（1日〜末日）
-    var parts = ym.split('-');
-    var year = parseInt(parts[0]);
-    var month = parseInt(parts[1]);
-    var lastDay = new Date(year, month, 0).getDate();
+    // 期間決定（ピッカー優先、なければ当月）
+    var customRange = getMrnEffectiveRange(ym);
+    var startStr, endStr;
+    if (customRange) {
+        startStr = customRange.start;
+        endStr = customRange.end;
+    } else {
+        startStr = ym + '-01';
+        var parts0 = ym.split('-');
+        var lastDay0 = new Date(parseInt(parts0[0]), parseInt(parts0[1]), 0).getDate();
+        endStr = ym + '-' + String(lastDay0).padStart(2, '0');
+    }
+
+    // 期間内の日付一覧（土日祝除外）
     var dates = [];
-    for (var d = 1; d <= lastDay; d++) {
-        var ds = ym + '-' + String(d).padStart(2, '0');
-        // 土日・祝日を除外
-        var dt = new Date(year, month - 1, d);
+    var startD = new Date(parseInt(startStr.slice(0,4)), parseInt(startStr.slice(5,7)) - 1, parseInt(startStr.slice(8,10)));
+    var endD = new Date(parseInt(endStr.slice(0,4)), parseInt(endStr.slice(5,7)) - 1, parseInt(endStr.slice(8,10)));
+    for (var dt = new Date(startD); dt <= endD; dt.setDate(dt.getDate() + 1)) {
         if (dt.getDay() === 0 || dt.getDay() === 6) continue;
+        var ds = fmtYmdLocal(dt);
         if (holidaysSet.has(ds)) continue;
         dates.push(ds);
     }
 
     // データ集計
-    var filtered = performanceData;
+    var filtered = performanceData.filter(function(r) {
+        return r.input_date >= startStr && r.input_date <= endStr;
+    });
     if (memberFilter !== 'all') {
         filtered = filtered.filter(function(r) { return r.member_name === memberFilter; });
     }
@@ -2045,7 +2325,7 @@ function renderManagement(filter) {
     const cancelChartHeight = Math.max(200, capData.filter(c => c.cancelCount > 0).length * 36 + 40);
 
     // 期間ラベル
-    const periodLabels = { day: '日別', week: '週別', month: '月別', quarter: 'Q別' };
+    const periodLabels = { day: '日別', week: '週別', month: '月別', quarter: 'Q別', custom: 'カスタム' };
 
     // ========== HTML構築 ==========
     let html = `

@@ -2705,6 +2705,44 @@ select option:hover {
 .dw-cal-input:focus { outline:none; border-color:#1155cc; box-shadow:0 0 0 2px rgba(17,85,204,0.15); }
 .dw-cal-holiday { font-size:0.7rem; color:#e04f24; }
 
+/* ========== 朝礼: Date Picker ========== */
+.mrn-picker-bar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 14px; background:#fff; border:1px solid #e2e5ea; border-radius:8px; margin-bottom:12px; }
+.mrn-picker-mode { display:inline-flex; background:#f3f5f8; border-radius:6px; padding:2px; }
+.mrn-picker-mode button { background:transparent; border:none; padding:5px 12px; font-size:0.78rem; color:#5b6473; cursor:pointer; border-radius:4px; font-weight:500; }
+.mrn-picker-mode button.active { background:#fff; color:#1155cc; box-shadow:0 1px 2px rgba(0,0,0,0.06); }
+.mrn-picker-input-wrap { position:relative; display:inline-flex; align-items:center; gap:6px; }
+.mrn-picker-input { padding:6px 28px 6px 10px; border:1px solid #d6dae1; border-radius:6px; font-size:0.82rem; min-width:130px; background:#fff; color:#222; cursor:pointer; }
+.mrn-picker-input:focus { outline:none; border-color:#1155cc; box-shadow:0 0 0 2px rgba(17,85,204,0.15); }
+.mrn-picker-icon { position:absolute; right:8px; top:50%; transform:translateY(-50%); pointer-events:none; color:#5b6473; font-size:0.78rem; }
+.mrn-picker-sep { color:#9aa3b2; font-size:0.85rem; }
+.mrn-picker-apply { background:#1155cc; color:#fff; border:none; border-radius:6px; padding:6px 14px; font-size:0.78rem; font-weight:600; cursor:pointer; }
+.mrn-picker-apply:hover { background:#0d4baf; }
+.mrn-picker-clear { background:transparent; color:#5b6473; border:1px solid #d6dae1; border-radius:6px; padding:6px 12px; font-size:0.78rem; cursor:pointer; }
+.mrn-picker-clear:hover { color:#1155cc; border-color:#1155cc; }
+.mrn-picker-summary { font-size:0.78rem; color:#5b6473; margin-left:auto; }
+
+.mrn-picker-popover { position:absolute; top:calc(100% + 6px); left:0; z-index:1000; background:#fff; border:1px solid #d6dae1; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,0.12); padding:14px; width:300px; display:none; }
+.mrn-picker-popover.open { display:block; }
+.mrn-picker-pop-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.mrn-picker-pop-month { font-weight:700; font-size:0.95rem; color:#222; }
+.mrn-picker-pop-nav { display:inline-flex; gap:4px; }
+.mrn-picker-pop-nav button { background:transparent; border:none; width:26px; height:26px; border-radius:4px; cursor:pointer; color:#5b6473; font-size:0.85rem; }
+.mrn-picker-pop-nav button:hover { background:#f3f5f8; color:#1155cc; }
+.mrn-picker-pop-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.mrn-picker-pop-dlabel { text-align:center; padding:6px 0; font-size:0.7rem; font-weight:600; color:#9aa3b2; }
+.mrn-picker-pop-dlabel.sun { color:#e04f24; }
+.mrn-picker-pop-dlabel.sat { color:#1155cc; }
+.mrn-picker-pop-day { text-align:center; padding:7px 0; font-size:0.82rem; color:#222; cursor:pointer; border-radius:6px; user-select:none; }
+.mrn-picker-pop-day:hover { background:#f3f5f8; }
+.mrn-picker-pop-day.other { color:#c5cad3; }
+.mrn-picker-pop-day.today { font-weight:700; color:#1155cc; }
+.mrn-picker-pop-day.selected { background:#1155cc; color:#fff; font-weight:700; }
+.mrn-picker-pop-day.in-range { background:#dbe5fb; color:#1155cc; }
+.mrn-picker-pop-day.range-start, .mrn-picker-pop-day.range-end { background:#1155cc; color:#fff; font-weight:700; }
+.mrn-picker-pop-footer { display:flex; justify-content:space-between; margin-top:10px; }
+.mrn-picker-pop-footer button { background:transparent; border:none; color:#1155cc; font-size:0.78rem; font-weight:600; cursor:pointer; padding:4px 6px; }
+.mrn-picker-pop-footer button:hover { text-decoration:underline; }
+
 /* ========== 印刷 ========== */
 @media print {
     .sidebar, .top-header, .filter-section, .refresh-btn { display: none !important; }
