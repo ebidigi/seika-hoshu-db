@@ -3729,10 +3729,11 @@ function renderAppointments() {
     // サマリは当月全体（今日以降も含む）
     const summaryData = allData;
 
-    // テーブル・ドロップダウン用は「今日まで」フィルタを適用
-    // ※ リスケは未来日が多いため除外（今日まで縛りで全件消えてしまうのを防ぐ）
+    // テーブル・ドロップダウン用「今日まで」フィルタは「未確認」絞り込み時のみ適用
+    // （担当者が今日までに確認すべきアポを浮き上がらせるため）
+    // 全て / 実施 / リスケ / キャンセル は今日以降の日程も含めて全件表示
     let tableBaseData = allData;
-    if (!appoShowAll && currentAppoFilter !== 'リスケ') {
+    if (!appoShowAll && currentAppoFilter === '未確認') {
         const today = formatDate(new Date());
         tableBaseData = tableBaseData.filter(a => !a.scheduled_date || a.scheduled_date <= today);
     }
@@ -3871,12 +3872,6 @@ function renderAppointments() {
 
 function filterAppoStatus(status) {
     currentAppoFilter = status;
-    // 「全て」を選んだら自動で「今日まで」表示に戻す
-    if (status === 'all') {
-        appoShowAll = false;
-        const btn = document.getElementById('appoShowAllBtn');
-        if (btn) btn.textContent = '全一覧を表示';
-    }
     document.querySelectorAll('.appo-status-tab').forEach(tab => {
         tab.classList.toggle('active', tab.dataset.status === status);
     });
