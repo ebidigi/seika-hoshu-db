@@ -192,7 +192,7 @@ async function executeTurso(sql, args = []) {
 
 // ==================== 除外チーム・メンバー ====================
 const EXCLUDED_TEAMS = [];
-const EXCLUDED_MEMBERS = [];
+const EXCLUDED_MEMBERS = ['辻森', '田中颯汰'];
 
 // ==================== メンバー名正規化（フロントエンド防御） ====================
 const MEMBER_NAME_NORMALIZE = {
@@ -323,6 +323,8 @@ function getExcludedMembers(ym) {
     membersData.forEach(m => {
         if (EXCLUDED_TEAMS.includes(m.team_name)) excluded.add(m.member_name);
     });
+    // 個別に永久除外するメンバー
+    EXCLUDED_MEMBERS.forEach(m => excluded.add(m));
     return [...excluded];
 }
 
@@ -1231,7 +1233,7 @@ function renderMorning(filter) {
 
     // 着地ヨミ
     const RESKED_CANCEL_RATE_MRN = 0.15;
-    const execForecastMrn = execConfirmed + Math.round(execExpected * (1 - RESKED_CANCEL_RATE_MRN));
+    const execForecastMrn = execConfirmed + Math.round(execUnconfirmed * (1 - RESKED_CANCEL_RATE_MRN));
     const forecastDiffMrn = execForecastMrn - periodExecTarget;
     const forecastColorMrn = forecastDiffMrn >= 0 ? '#86aaec' : '#ef947a';
 
@@ -2261,64 +2263,100 @@ function renderManagement(filter) {
     });
 
     // ========== 案件別データ準備 ==========
+    // 列定義（ユーザー指定）:
+    //  当月取得件数 = appointments で acquisition_date が当月の行（=allAppo）
+    //  当月実施アポ件数合計 = appointments で scheduled_date が当月の行（=allExecAppo / 売上報告RawData由来）
+    //  取得金額 = アポ単価 × 当月取得件数
+    //  却下,キャンセル数 = 当月実施 のうち status=キャンセル（売上報告RawData）
+    //  却下,キャンセル率 = 当月実施アポ件数合計 ÷ 却下,キャンセル数 × 100（ユーザー指定式）
     const capData = projectsData.filter(p => p.status === 'active').map(proj => {
         const projPerf = allPerf.filter(d => d.project_name === proj.project_name);
         const projAppo = allAppo.filter(d => d.project_name === proj.project_name);
+        const projExec = allExecAppo.filter(d => d.project_name === proj.project_name);
         const callCount = sum(projPerf, 'call_count');
         const prCount = sum(projPerf, 'pr_count');
-        const appoCount = sum(projPerf, 'appointment_count');
+        const appoCountPerf = sum(projPerf, 'appointment_count');
+        const callHours = sum(projPerf, 'call_hours');
         const unitPrice = proj.unit_price || 0;
-        const actualCount = projAppo.length;
-        const actualAmount = projAppo.reduce((s, a) => s + (a.amount || 0), 0);
-        const capCount = proj.monthly_cap_count || 0;
-        const capAmount = capCount * unitPrice;
-        const consumeRate = capCount > 0 ? Math.round(actualCount / capCount * 100) : 0;
-        const remaining = capCount > 0 ? capCount - actualCount : null;
-        const cancelCount = projAppo.filter(a => a.status === 'キャンセル').length;
-        const cancelRate = actualCount > 0 ? Math.round(cancelCount / actualCount * 100) : 0;
-        const callToPr = callCount > 0 ? (prCount / callCount * 100).toFixed(1) : '-';
-        const prToAppo = prCount > 0 ? (appoCount / prCount * 100).toFixed(1) : '-';
-        const callToAppo = callCount > 0 ? (appoCount / callCount * 100).toFixed(1) : '-';
-        return { name: proj.project_name, unitPrice, capCount, capAmount, actualCount, actualAmount, consumeRate, remaining, cancelCount, cancelRate, callToPr, prToAppo, callToAppo };
-    }).filter(c => c.capCount > 0 || c.actualCount > 0);
+        const acquiredCount = projAppo.length;
+        const execCount = projExec.length;
+        const acqAmount = unitPrice * acquiredCount;
+        const cancelCount = projExec.filter(a => a.status === 'キャンセル').length;
+        const cancelRate = cancelCount > 0 ? Math.round(execCount / cancelCount * 100) : 0;
+        const callToAppo = callCount > 0 ? (appoCountPerf / callCount * 100).toFixed(1) : '-';
+        const prRate = callCount > 0 ? (prCount / callCount * 100).toFixed(1) : '-';
+        const prToAppo = prCount > 0 ? (appoCountPerf / prCount * 100).toFixed(1) : '-';
+        const callsPerHour = callHours > 0 ? (callCount / callHours).toFixed(1) : '-';
+        return { name: proj.project_name, unitPrice, acquiredCount, execCount, acqAmount, cancelCount, cancelRate, callCount, prCount, appoCountPerf, callHours, callToAppo, prRate, prToAppo, callsPerHour };
+    }).filter(c => c.acquiredCount > 0 || c.execCount > 0 || c.callCount > 0);
 
     // 案件テーブルHTML
     let projTableHtml = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
-        <th>案件名</th><th class="text-right">単価</th>
-        <th class="text-right" style="background:#eef3fb;color:#6b8cba;">キャップ</th><th class="text-right" style="background:#eef3fb;color:#6b8cba;">キャップ金額</th>
-        <th class="text-right">取得数</th><th class="text-right">取得金額</th><th class="text-right">消化率</th><th class="text-right">残り</th>
-        <th class="text-right" style="background:#fdf2f0;color:#c0392b;">キャンセル率</th>
-        <th class="text-right">架→着電</th><th class="text-right">着電→アポ</th><th class="text-right">架→アポ</th>
+        <th>案件</th>
+        <th class="text-right">アポ単価</th>
+        <th class="text-right">当月取得件数</th>
+        <th class="text-right">当月実施アポ件数合計</th>
+        <th class="text-right">取得金額</th>
+        <th class="text-right" style="background:#fdf2f0;color:#c0392b;">却下,キャンセル数</th>
+        <th class="text-right" style="background:#fdf2f0;color:#c0392b;">却下,キャンセル率</th>
+        <th class="text-right">架電数</th>
+        <th class="text-right">着電数</th>
+        <th class="text-right">アポ数</th>
+        <th class="text-right">稼働時間</th>
+        <th class="text-right">架電Toアポ率</th>
+        <th class="text-right">着電率</th>
+        <th class="text-right">着電Toアポ率</th>
+        <th class="text-right">1時間あたり架電数</th>
     </tr></thead><tbody>`;
-    let ttCapCount = 0, ttActCount = 0, ttCapAmt = 0, ttActAmt = 0, ttCancelCount = 0;
+    let ttAcq = 0, ttExec = 0, ttAmt = 0, ttCancel = 0, ttCalls = 0, ttPr = 0, ttAppoP = 0, ttHours = 0;
     capData.forEach(c => {
-        ttCapCount += c.capCount; ttActCount += c.actualCount;
-        ttCapAmt += c.capAmount; ttActAmt += c.actualAmount; ttCancelCount += c.cancelCount;
-        const cColor = c.consumeRate >= 90 ? '#ef947a' : c.consumeRate >= 70 ? '#ede07d' : '#86aaec';
-        const crColor = c.cancelRate >= 20 ? '#c0392b' : c.cancelRate >= 15 ? '#e67e22' : '#2d3436';
+        ttAcq += c.acquiredCount;
+        ttExec += c.execCount;
+        ttAmt += c.acqAmount;
+        ttCancel += c.cancelCount;
+        ttCalls += c.callCount;
+        ttPr += c.prCount;
+        ttAppoP += c.appoCountPerf;
+        ttHours += c.callHours;
         projTableHtml += `<tr>
             <td style="font-weight:600;">${escapeHtml(c.name)}</td>
             <td class="text-right">¥${c.unitPrice.toLocaleString()}</td>
-            <td class="text-right" style="background:#f4f7fc;color:#6b8cba;">${c.capCount > 0 ? c.capCount + '件' : '-'}</td>
-            <td class="text-right" style="background:#f4f7fc;color:#6b8cba;">${c.capAmount > 0 ? '¥' + c.capAmount.toLocaleString() : '-'}</td>
-            <td class="text-right">${c.actualCount}件</td>
-            <td class="text-right">¥${c.actualAmount.toLocaleString()}</td>
-            <td class="text-right" style="font-weight:600;color:${cColor};">${c.capCount > 0 ? c.consumeRate + '%' : '-'}</td>
-            <td class="text-right">${c.remaining !== null ? c.remaining + '件' : '-'}</td>
-            <td class="text-right" style="background:#fdf8f7;font-weight:600;color:${crColor};">${c.actualCount > 0 ? c.cancelRate + '%' : '-'}<span style="font-weight:400;font-size:0.7rem;color:#999;"> (${c.cancelCount}件)</span></td>
-            <td class="text-right">${c.callToPr}%</td>
-            <td class="text-right">${c.prToAppo}%</td>
-            <td class="text-right">${c.callToAppo}%</td>
+            <td class="text-right">${c.acquiredCount}件</td>
+            <td class="text-right">${c.execCount}件</td>
+            <td class="text-right">¥${c.acqAmount.toLocaleString()}</td>
+            <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${c.cancelCount}件</td>
+            <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${c.cancelCount > 0 ? c.cancelRate + '%' : '-'}</td>
+            <td class="text-right">${c.callCount.toLocaleString()}</td>
+            <td class="text-right">${c.prCount.toLocaleString()}</td>
+            <td class="text-right">${c.appoCountPerf.toLocaleString()}</td>
+            <td class="text-right">${c.callHours.toFixed(1)}h</td>
+            <td class="text-right">${c.callToAppo === '-' ? '-' : c.callToAppo + '%'}</td>
+            <td class="text-right">${c.prRate === '-' ? '-' : c.prRate + '%'}</td>
+            <td class="text-right">${c.prToAppo === '-' ? '-' : c.prToAppo + '%'}</td>
+            <td class="text-right">${c.callsPerHour}</td>
         </tr>`;
     });
+    const ttCallToAppo = ttCalls > 0 ? (ttAppoP / ttCalls * 100).toFixed(1) + '%' : '-';
+    const ttPrRate = ttCalls > 0 ? (ttPr / ttCalls * 100).toFixed(1) + '%' : '-';
+    const ttPrToAppo = ttPr > 0 ? (ttAppoP / ttPr * 100).toFixed(1) + '%' : '-';
+    const ttCallsPerHour = ttHours > 0 ? (ttCalls / ttHours).toFixed(1) : '-';
+    const ttCancelRate = ttCancel > 0 ? Math.round(ttExec / ttCancel * 100) + '%' : '-';
     projTableHtml += `</tbody><tfoot><tr style="font-weight:600;">
-        <td>合計</td><td></td>
-        <td class="text-right" style="background:#f4f7fc;color:#6b8cba;">${ttCapCount}件</td><td class="text-right" style="background:#f4f7fc;color:#6b8cba;">¥${ttCapAmt.toLocaleString()}</td>
-        <td class="text-right">${ttActCount}件</td><td class="text-right">¥${ttActAmt.toLocaleString()}</td>
-        <td class="text-right">${ttCapCount > 0 ? Math.round(ttActCount / ttCapCount * 100) + '%' : '-'}</td>
-        <td class="text-right">${ttCapCount > 0 ? (ttCapCount - ttActCount) + '件' : '-'}</td>
-        <td class="text-right" style="background:#fdf8f7;font-weight:600;color:${(ttActCount > 0 ? Math.round(ttCancelCount / ttActCount * 100) : 0) >= 15 ? '#c0392b' : '#2d3436'};">${ttActCount > 0 ? Math.round(ttCancelCount / ttActCount * 100) + '%' : '-'}<span style="font-weight:400;font-size:0.7rem;color:#999;"> (${ttCancelCount}件)</span></td>
-        <td></td><td></td><td></td>
+        <td>合計</td>
+        <td></td>
+        <td class="text-right">${ttAcq}件</td>
+        <td class="text-right">${ttExec}件</td>
+        <td class="text-right">¥${ttAmt.toLocaleString()}</td>
+        <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${ttCancel}件</td>
+        <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${ttCancelRate}</td>
+        <td class="text-right">${ttCalls.toLocaleString()}</td>
+        <td class="text-right">${ttPr.toLocaleString()}</td>
+        <td class="text-right">${ttAppoP.toLocaleString()}</td>
+        <td class="text-right">${ttHours.toFixed(1)}h</td>
+        <td class="text-right">${ttCallToAppo}</td>
+        <td class="text-right">${ttPrRate}</td>
+        <td class="text-right">${ttPrToAppo}</td>
+        <td class="text-right">${ttCallsPerHour}</td>
     </tr></tfoot></table></div>`;
 
     // 取消率チャート高さ
@@ -2386,59 +2424,40 @@ function renderManagement(filter) {
         </div>
     </div>
 
-    <!-- 全体KPI -->
-    <div class="mgmt-kpi-numbers">
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">架電数</div><div class="mgmt-kpi-val">${totalCalls.toLocaleString()}</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">着電数</div><div class="mgmt-kpi-val">${totalPr.toLocaleString()}</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">アポ数</div><div class="mgmt-kpi-val">${totalAppoCount.toLocaleString()}</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">架電toアポ率</div><div class="mgmt-kpi-val">${mgCallToAppo}%</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">着電toアポ率</div><div class="mgmt-kpi-val">${mgPrToAppo}%</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">架電to着電率</div><div class="mgmt-kpi-val">${mgCallToPr}%</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">平均単価</div><div class="mgmt-kpi-val">¥${avgUnitPrice.toLocaleString()}</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">月内実施率</div><div class="mgmt-kpi-val">${appoWithinMonthRate}%</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">キャンセル率</div><div class="mgmt-kpi-val">${cancelRateVal}%</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">実施確定率</div><div class="mgmt-kpi-val">${execConfirmRateVal}%</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">1hあたり架電数</div><div class="mgmt-kpi-val">${callsPerHour}</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">1日あたり架電数</div><div class="mgmt-kpi-val">${callsPerDay}</div></div>
-        <div class="mgmt-kpi-item"><div class="mgmt-kpi-label">1日あたり稼働時間</div><div class="mgmt-kpi-val">${hoursPerDay}h</div></div>
-    </div>
+    <!-- 全体KPI（当月 vs 前月） -->
+    ${(() => {
+        const prevYM = getPrevYM(ym);
+        const curr = computeMonthKpis(ym);
+        const prev = computeMonthKpis(prevYM);
+        const intFmt = v => Math.round(v).toLocaleString();
+        const pctFmt = v => v.toFixed(1);
+        const yenFmt = v => '¥' + Math.round(v).toLocaleString();
+        const card = (label, currVal, prevVal, fmt, opts = {}) => `
+            <div class="mgmt-kpi-item">
+                <div class="mgmt-kpi-label">${label}</div>
+                <div class="mgmt-kpi-val">${fmt(currVal)}${opts.suffix || ''}</div>
+                <div class="mgmt-kpi-prev">前月 ${fmt(prevVal)}${opts.suffix || ''} ${kpiDiffBadge(currVal, prevVal, { invert: opts.invert, fmt, suffix: opts.suffix })}</div>
+            </div>`;
+        return `<div class="mgmt-kpi-numbers">
+            ${card('架電数', curr.calls, prev.calls, intFmt)}
+            ${card('着電数', curr.pr, prev.pr, intFmt)}
+            ${card('アポ数', curr.appoCnt, prev.appoCnt, intFmt)}
+            ${card('架電toアポ率', curr.callToAppo, prev.callToAppo, pctFmt, { suffix: '%' })}
+            ${card('着電toアポ率', curr.prToAppo, prev.prToAppo, pctFmt, { suffix: '%' })}
+            ${card('架電to着電率', curr.callToPr, prev.callToPr, pctFmt, { suffix: '%' })}
+            ${card('平均単価', curr.avgUnit, prev.avgUnit, yenFmt)}
+            ${card('月内実施率', curr.withinMonthRate, prev.withinMonthRate, pctFmt, { suffix: '%' })}
+            ${card('キャンセル率', curr.cancelRate, prev.cancelRate, pctFmt, { suffix: '%', invert: true })}
+            ${card('実施確定率', curr.confirmRate, prev.confirmRate, pctFmt, { suffix: '%' })}
+            ${card('1hあたり架電数', curr.callsPerHour, prev.callsPerHour, pctFmt)}
+            ${card('1日あたり架電数', curr.callsPerDay, prev.callsPerDay, intFmt)}
+            ${card('1日あたり稼働時間', curr.hoursPerDay, prev.hoursPerDay, pctFmt, { suffix: 'h' })}
+        </div>`;
+    })()}
 
     <!-- 個人別 取得金額（縦棒グラフ） -->
     <div class="section-title" style="margin-top:28px;">個人別 取得金額 目標 vs 実績（既存/新規）</div>
     <div class="mgmt-chart-container"><canvas id="mgmtBarAmount"></canvas></div>
-
-    <!-- 個人別 ランキング3列 -->
-    <div class="mgmt-hbar-row" style="margin-top:16px;">
-        <div>
-            <div class="section-title">架電数ランキング</div>
-            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarCalls"></canvas></div>
-        </div>
-        <div>
-            <div class="section-title">着電数ランキング</div>
-            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarPr"></canvas></div>
-        </div>
-        <div>
-            <div class="section-title">アポ数ランキング</div>
-            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarAppo"></canvas></div>
-        </div>
-    </div>
-
-    <!-- 歩留まりランキング -->
-    <div class="section-title" style="margin-top:28px;">歩留まりランキング</div>
-    <div class="mgmt-hbar-row">
-        <div>
-            <div class="section-title" style="font-size:0.8rem;">架電→アポ率</div>
-            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarCallToAppo"></canvas></div>
-        </div>
-        <div>
-            <div class="section-title" style="font-size:0.8rem;">架電→着電率</div>
-            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarCallToPr"></canvas></div>
-        </div>
-        <div>
-            <div class="section-title" style="font-size:0.8rem;">着電→アポ率</div>
-            <div class="mgmt-chart-container mgmt-hbar-sm"><canvas id="mgmtHBarPrToAppo"></canvas></div>
-        </div>
-    </div>
 
     <!-- 案件別 詳細テーブル -->
     <div class="section-title" style="margin-top:28px;">案件別 詳細</div>
@@ -2679,47 +2698,12 @@ function renderManagement(filter) {
         barAmountCtx.style.cursor = 'pointer';
     }
 
-    // 架電数・着電数・アポ数ランキング
-    createHBar('mgmtHBarCalls', memberData, 'calls', v => v.toLocaleString(), () => '#86aaec');
-    createHBar('mgmtHBarPr', memberData, 'pr', v => v.toLocaleString(), () => '#b8d4f0');
-    createHBar('mgmtHBarAppo', memberData, 'appo', v => v.toLocaleString(), () => '#90b8f8');
-
-    // 歩留まりランキング
-    const yieldData = memberData.map(d => {
-        const callToAppo = d.calls > 0 ? d.appo / d.calls * 100 : 0;
-        const callToPr = d.calls > 0 ? d.pr / d.calls * 100 : 0;
-        const prToAppo = d.pr > 0 ? d.appo / d.pr * 100 : 0;
-        return { name: d.name, callToAppo, callToPr, prToAppo };
-    });
-
-    function createYieldHBar(canvasId, data, key, color) {
-        const sorted = [...data].sort((a, b) => b[key] - a[key]);
-        const ctx = document.getElementById(canvasId);
-        if (!ctx) return;
-        const h = Math.max(200, sorted.length * 30 + 40);
-        ctx.parentElement.style.height = h + 'px';
-        mgmtCharts[canvasId] = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: sorted.map(d => d.name),
-                datasets: [{ data: sorted.map(d => d[key]), backgroundColor: color, borderRadius: 4, barPercentage: 0.7, categoryPercentage: 0.85 }]
-            },
-            options: {
-                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-                scales: {
-                    x: { beginAtZero: true, ticks: { callback: v => v.toFixed(1) + '%', font: { size: 10 } }, grid: { color: '#f5f5f5' } },
-                    y: { ticks: { font: { size: 11, family: '"Noto Sans JP"', weight: '600' } }, grid: { display: false } }
-                },
-                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ctx.parsed.x.toFixed(1) + '%' } } }
-            }
-        });
-    }
-    createYieldHBar('mgmtHBarCallToAppo', yieldData, 'callToAppo', '#86aaec');
-    createYieldHBar('mgmtHBarCallToPr', yieldData, 'callToPr', '#b8d4f0');
-    createYieldHBar('mgmtHBarPrToAppo', yieldData, 'prToAppo', '#90b8f8');
-
     // 案件別キャンセル率バーチャート（キャンセル件数0の案件は除外）
-    const cancelRateData = capData.filter(c => c.cancelCount > 0).sort((a, b) => b.cancelRate - a.cancelRate);
+    // チャート用は通常意味のキャンセル率（キャンセル数 / 当月実施合計 × 100）で表示
+    const cancelRateData = capData
+        .filter(c => c.cancelCount > 0 && c.execCount > 0)
+        .map(c => ({ ...c, chartCancelRate: Math.round(c.cancelCount / c.execCount * 100) }))
+        .sort((a, b) => b.chartCancelRate - a.chartCancelRate);
     const cancelBarCtx = document.getElementById('mgmtBarCancelRate');
     if (cancelBarCtx && cancelRateData.length > 0) {
         mgmtCharts['mgmtBarCancelRate'] = new Chart(cancelBarCtx, {
@@ -2727,8 +2711,8 @@ function renderManagement(filter) {
             data: {
                 labels: cancelRateData.map(c => c.name),
                 datasets: [{
-                    data: cancelRateData.map(c => c.cancelRate),
-                    backgroundColor: cancelRateData.map(c => c.cancelRate >= 30 ? 'var(--red-400)' : 'var(--blue-200)'),
+                    data: cancelRateData.map(c => c.chartCancelRate),
+                    backgroundColor: cancelRateData.map(c => c.chartCancelRate >= 30 ? 'var(--red-400)' : 'var(--blue-200)'),
                     borderRadius: 4,
                     barPercentage: 0.7,
                     categoryPercentage: 0.85
@@ -2739,7 +2723,7 @@ function renderManagement(filter) {
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: { beginAtZero: true, max: Math.max(100, ...cancelRateData.map(c => c.cancelRate)), ticks: { callback: v => v + '%', font: { size: 10 } }, grid: { color: '#f5f5f5' } },
+                    x: { beginAtZero: true, max: Math.max(100, ...cancelRateData.map(c => c.chartCancelRate)), ticks: { callback: v => v + '%', font: { size: 10 } }, grid: { color: '#f5f5f5' } },
                     y: { ticks: { font: { size: 11, family: '"Noto Sans JP"', weight: '600' } }, grid: { display: false } }
                 },
                 plugins: {
@@ -3714,8 +3698,9 @@ function renderAppointments() {
     const summaryData = allData;
 
     // テーブル・ドロップダウン用は「今日まで」フィルタを適用
+    // ※ リスケは未来日が多いため除外（今日まで縛りで全件消えてしまうのを防ぐ）
     let tableBaseData = allData;
-    if (!appoShowAll) {
+    if (!appoShowAll && currentAppoFilter !== 'リスケ') {
         const today = formatDate(new Date());
         tableBaseData = tableBaseData.filter(a => !a.scheduled_date || a.scheduled_date <= today);
     }
@@ -3747,29 +3732,31 @@ function renderAppointments() {
     const unconfirmedRate = total > 0 ? (statusCounts['未確認'] / total * 100).toFixed(1) : '0';
 
     const totalAmount = statusAmounts['実施'] + statusAmounts['リスケ'] + statusAmounts['キャンセル'] + statusAmounts['未確認'];
+    // 各カードクリックでステータス絞り込み（XSSなし: ハードコードされた静的属性のみ）
+    const _act = (s) => currentAppoFilter === s ? ' rate-card-active' : '';
     document.getElementById('appo-status-summary').innerHTML = `
         <div class="rate-grid" style="margin-bottom:12px;">
-            <div class="rate-card">
+            <div class="rate-card rate-card-clickable${_act('all')}" onclick="filterAppoStatus('all')">
                 <div class="rate-value" style="color:var(--text-dark);">${total}件</div>
                 <div class="rate-label">総アポ数</div>
                 <div style="font-size:0.85rem;font-weight:600;color:var(--text-dark);margin-top:2px;">¥${totalAmount.toLocaleString()}</div>
             </div>
-            <div class="rate-card">
+            <div class="rate-card rate-card-clickable${_act('実施')}" onclick="filterAppoStatus('実施')">
                 <div class="rate-value" style="color:var(--primary-blue);">${statusCounts['実施']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${executeRate}%)</span></div>
                 <div class="rate-label">実施確定</div>
                 <div style="font-size:0.85rem;font-weight:600;color:var(--primary-blue);margin-top:2px;">¥${statusAmounts['実施'].toLocaleString()}</div>
             </div>
-            <div class="rate-card">
+            <div class="rate-card rate-card-clickable${_act('リスケ')}" onclick="filterAppoStatus('リスケ')">
                 <div class="rate-value" style="color:#8a7a00;">${statusCounts['リスケ']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${rescheduleRate}%)</span></div>
                 <div class="rate-label">リスケ</div>
                 <div style="font-size:0.85rem;font-weight:600;color:#8a7a00;margin-top:2px;">¥${statusAmounts['リスケ'].toLocaleString()}</div>
             </div>
-            <div class="rate-card">
+            <div class="rate-card rate-card-clickable${_act('キャンセル')}" onclick="filterAppoStatus('キャンセル')">
                 <div class="rate-value" style="color:var(--primary-red);">${statusCounts['キャンセル']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${cancelRate}%)</span></div>
                 <div class="rate-label">キャンセル</div>
                 <div style="font-size:0.85rem;font-weight:600;color:var(--primary-red);margin-top:2px;">¥${statusAmounts['キャンセル'].toLocaleString()}</div>
             </div>
-            <div class="rate-card">
+            <div class="rate-card rate-card-clickable${_act('未確認')}" onclick="filterAppoStatus('未確認')">
                 <div class="rate-value" style="color:var(--text-light);">${statusCounts['未確認']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${unconfirmedRate}%)</span></div>
                 <div class="rate-label">未確認</div>
                 <div style="font-size:0.85rem;font-weight:600;color:var(--text-light);margin-top:2px;">¥${statusAmounts['未確認'].toLocaleString()}</div>
@@ -3852,6 +3839,12 @@ function renderAppointments() {
 
 function filterAppoStatus(status) {
     currentAppoFilter = status;
+    // 「全て」を選んだら自動で「今日まで」表示に戻す
+    if (status === 'all') {
+        appoShowAll = false;
+        const btn = document.getElementById('appoShowAllBtn');
+        if (btn) btn.textContent = '全一覧を表示';
+    }
     document.querySelectorAll('.appo-status-tab').forEach(tab => {
         tab.classList.toggle('active', tab.dataset.status === status);
     });
@@ -5861,6 +5854,77 @@ function getEndOfMonth(ym) {
 
 function sum(arr, key) {
     return arr.reduce((s, d) => s + (parseFloat(d[key]) || 0), 0);
+}
+
+// 前月 ym（YYYY-MM 形式）
+function getPrevYM(ym) {
+    const [y, m] = ym.split('-').map(Number);
+    if (m === 1) return `${y - 1}-12`;
+    return `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
+// 指定月の全体KPIをまとめて算出（KPIカード用）
+function computeMonthKpis(ym) {
+    const excluded = getExcludedMembers(ym);
+    const perf = performanceData.filter(d => !excluded.includes(d.member_name) && d.input_date && d.input_date.startsWith(ym));
+    const appo = appointmentsData.filter(d => !excluded.includes(d.member_name) && d.acquisition_date && d.acquisition_date.startsWith(ym));
+    const execAppo = executionAppoData.filter(d => !excluded.includes(d.member_name) && d.scheduled_date && d.scheduled_date.startsWith(ym));
+
+    const calls = sum(perf, 'call_count');
+    const pr = sum(perf, 'pr_count');
+    const appoCnt = sum(perf, 'appointment_count');
+    const acqAmount = appo.reduce((s, a) => s + (a.amount || 0), 0);
+
+    const callToAppo = calls > 0 ? appoCnt / calls * 100 : 0;
+    const prToAppo = pr > 0 ? appoCnt / pr * 100 : 0;
+    const callToPr = calls > 0 ? pr / calls * 100 : 0;
+    const avgUnit = appo.length > 0 ? Math.round(acqAmount / appo.length) : 0;
+    const withinMonth = appo.filter(a => a.scheduled_date && a.scheduled_date.startsWith(ym)).length;
+    const withinMonthRate = appo.length > 0 ? withinMonth / appo.length * 100 : 0;
+
+    const execTotal = execAppo.length;
+    const execCancel = execAppo.filter(a => a.status === 'キャンセル').length;
+    const execConfirmed = execAppo.filter(a => a.status === '実施').length;
+    const cancelRate = execTotal > 0 ? execCancel / execTotal * 100 : 0;
+    const confirmRate = execTotal > 0 ? execConfirmed / execTotal * 100 : 0;
+
+    const hours = sum(perf, 'call_hours');
+    const memberDays = (() => {
+        const md = {};
+        perf.forEach(r => { if (!md[r.member_name]) md[r.member_name] = new Set(); md[r.member_name].add(r.input_date); });
+        return Object.values(md).reduce((s, set) => s + set.size, 0);
+    })();
+    const callsPerHour = hours > 0 ? calls / hours : 0;
+    const callsPerDay = memberDays > 0 ? calls / memberDays : 0;
+    const hoursPerDay = memberDays > 0 ? hours / memberDays : 0;
+
+    return { calls, pr, appoCnt, callToAppo, prToAppo, callToPr, avgUnit, withinMonthRate, cancelRate, confirmRate, callsPerHour, callsPerDay, hoursPerDay };
+}
+
+// 前月比表示用の小タグHTML（差分・矢印）
+function kpiPrevTag(prev, fmt, opts = {}) {
+    const { invert = false, isPct = false, suffix = '' } = opts;
+    if (prev === null || prev === undefined || (typeof prev === 'number' && !isFinite(prev))) {
+        return `<div class="mgmt-kpi-prev">前月 -</div>`;
+    }
+    return `<div class="mgmt-kpi-prev">前月 ${fmt(prev)}${suffix}</div>`;
+}
+
+// 増減記号（カレント vs 前月） — invert: 大きい方が悪い指標(キャンセル率など)
+function kpiDiffBadge(curr, prev, opts = {}) {
+    const { invert = false, isPct = false, fmt = (v) => v.toFixed(1), suffix = '' } = opts;
+    if (prev === null || prev === undefined || !isFinite(prev) || prev === 0 && curr === 0) {
+        return '';
+    }
+    const diff = curr - prev;
+    const up = diff > 0;
+    const eq = Math.abs(diff) < 0.01;
+    if (eq) return `<span class="mgmt-kpi-diff" style="color:#999;">±0</span>`;
+    const good = invert ? !up : up;
+    const color = good ? '#5e7eb4' : '#c0392b';
+    const arrow = up ? '▲' : '▼';
+    const sign = up ? '+' : '';
+    return `<span class="mgmt-kpi-diff" style="color:${color};">${arrow} ${sign}${fmt(diff)}${suffix}</span>`;
 }
 
 function pct(value, target) {
