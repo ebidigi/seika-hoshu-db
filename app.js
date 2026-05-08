@@ -37,6 +37,10 @@ let executionAppoData = []; // 当月実施予定のアポ（前月以前取得�
 let dailyPlansData = []; // 予定報告データ
 let dailyTargetsData = []; // 日別目標
 let weeklyTargetsData = []; // 週別目標
+// KPIカード前月比用（軽量データ）
+let prevPerformanceData = [];
+let prevAppointmentsData = [];
+let prevExecutionAppoData = [];
 let appoShowAll = false; // false=今日まで, true=全一覧
 let appoSortKey = 'scheduled_date'; // デフォルトソートキー
 let appoSortAsc = false; // false=降順
@@ -627,6 +631,34 @@ async function loadMonthData() {
     // 同一人物の重複アポを除去（member_name + project_name + acquisition_date + customer_name）
     appointmentsData = deduplicateAppointments(appointmentsData);
     executionAppoData = deduplicateAppointments(executionAppoData);
+
+    // KPIカード前月比用に前月データもまとめてロード
+    const prevYM = getPrevYM(ym);
+    const prevStart = prevYM + '-01';
+    const prevEnd = getEndOfMonth(prevYM);
+    const prevResults = await Promise.all([
+        queryTurso(
+            "SELECT input_date, member_name, project_name, call_count, pr_count, appointment_count, call_hours FROM performance_rawdata WHERE input_date >= ? AND input_date <= ?",
+            [prevStart, prevEnd]
+        ).catch(() => []),
+        queryTurso(
+            "SELECT acquisition_date, scheduled_date, member_name, project_name, customer_name, status, amount FROM appointments WHERE acquisition_date >= ? AND acquisition_date <= ?",
+            [prevStart, prevEnd]
+        ).catch(() => []),
+        queryTurso(
+            "SELECT acquisition_date, scheduled_date, member_name, project_name, customer_name, status, amount FROM appointments WHERE scheduled_date >= ? AND scheduled_date <= ?",
+            [prevStart, prevEnd]
+        ).catch(() => [])
+    ]);
+    prevPerformanceData = prevResults[0] || [];
+    prevAppointmentsData = prevResults[1] || [];
+    prevExecutionAppoData = prevResults[2] || [];
+    normalizeDataMemberNames(prevPerformanceData);
+    normalizeDataMemberNames(prevAppointmentsData);
+    normalizeDataMemberNames(prevExecutionAppoData);
+    prevAppointmentsData = deduplicateAppointments(prevAppointmentsData);
+    prevExecutionAppoData = deduplicateAppointments(prevExecutionAppoData);
+    prevPerformanceData = deduplicatePerformance(prevPerformanceData);
 
     // 実績の重複排除（正規化後に同一 member_name + project_name + input_date が複数存在する場合）
     performanceData = deduplicatePerformance(performanceData);
@@ -5865,10 +5897,16 @@ function getPrevYM(ym) {
 
 // 指定月の全体KPIをまとめて算出（KPIカード用）
 function computeMonthKpis(ym) {
+    const currentYM = (typeof document !== 'undefined' && document.getElementById('filterMonth')) ? document.getElementById('filterMonth').value : ym;
+    // 当月以外（=前月）はloadMonthDataで別取得した軽量データを使う
+    const isPrev = ym !== currentYM;
+    const perfSrc = isPrev ? prevPerformanceData : performanceData;
+    const appoSrc = isPrev ? prevAppointmentsData : appointmentsData;
+    const execSrc = isPrev ? prevExecutionAppoData : executionAppoData;
     const excluded = getExcludedMembers(ym);
-    const perf = performanceData.filter(d => !excluded.includes(d.member_name) && d.input_date && d.input_date.startsWith(ym));
-    const appo = appointmentsData.filter(d => !excluded.includes(d.member_name) && d.acquisition_date && d.acquisition_date.startsWith(ym));
-    const execAppo = executionAppoData.filter(d => !excluded.includes(d.member_name) && d.scheduled_date && d.scheduled_date.startsWith(ym));
+    const perf = perfSrc.filter(d => !excluded.includes(d.member_name) && d.input_date && d.input_date.startsWith(ym));
+    const appo = appoSrc.filter(d => !excluded.includes(d.member_name) && d.acquisition_date && d.acquisition_date.startsWith(ym));
+    const execAppo = execSrc.filter(d => !excluded.includes(d.member_name) && d.scheduled_date && d.scheduled_date.startsWith(ym));
 
     const calls = sum(perf, 'call_count');
     const pr = sum(perf, 'pr_count');
