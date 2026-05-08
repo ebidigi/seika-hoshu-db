@@ -2300,7 +2300,7 @@ function renderManagement(filter) {
     //  当月実施アポ件数合計 = appointments で scheduled_date が当月の行（=allExecAppo / 売上報告RawData由来）
     //  取得金額 = アポ単価 × 当月取得件数
     //  却下,キャンセル数 = 当月実施 のうち status=キャンセル（売上報告RawData）
-    //  却下,キャンセル率 = 当月実施アポ件数合計 ÷ 却下,キャンセル数 × 100（ユーザー指定式）
+    //  却下,キャンセル率 = 却下,キャンセル数 ÷ 当月実施アポ件数合計 × 100
     const capData = projectsData.filter(p => p.status === 'active').map(proj => {
         const projPerf = allPerf.filter(d => d.project_name === proj.project_name);
         const projAppo = allAppo.filter(d => d.project_name === proj.project_name);
@@ -2314,7 +2314,7 @@ function renderManagement(filter) {
         const execCount = projExec.length;
         const acqAmount = unitPrice * acquiredCount;
         const cancelCount = projExec.filter(a => a.status === 'キャンセル').length;
-        const cancelRate = cancelCount > 0 ? Math.round(execCount / cancelCount * 100) : 0;
+        const cancelRate = execCount > 0 ? Math.round(cancelCount / execCount * 100) : 0;
         const callToAppo = callCount > 0 ? (appoCountPerf / callCount * 100).toFixed(1) : '-';
         const prRate = callCount > 0 ? (prCount / callCount * 100).toFixed(1) : '-';
         const prToAppo = prCount > 0 ? (appoCountPerf / prCount * 100).toFixed(1) : '-';
@@ -2372,7 +2372,7 @@ function renderManagement(filter) {
     const ttPrRate = ttCalls > 0 ? (ttPr / ttCalls * 100).toFixed(1) + '%' : '-';
     const ttPrToAppo = ttPr > 0 ? (ttAppoP / ttPr * 100).toFixed(1) + '%' : '-';
     const ttCallsPerHour = ttHours > 0 ? (ttCalls / ttHours).toFixed(1) : '-';
-    const ttCancelRate = ttCancel > 0 ? Math.round(ttExec / ttCancel * 100) + '%' : '-';
+    const ttCancelRate = ttExec > 0 ? Math.round(ttCancel / ttExec * 100) + '%' : '-';
     projTableHtml += `</tbody><tfoot><tr style="font-weight:600;">
         <td>合計</td>
         <td></td>
