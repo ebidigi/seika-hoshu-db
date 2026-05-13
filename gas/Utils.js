@@ -115,6 +115,10 @@ const MEMBER_NAME_MAP = {
   '海老根 涼太': '海老根',
   '田中克樹': '田中か',
   '田中 克樹': '田中か',
+  '越後敦也': '越後',
+  '越後 敦也': '越後',
+  '松坂有志': '松坂',
+  '松坂 有志': '松坂',
   // メールアドレス → DB正規名
   'k.matsui@digi-man.com': '松居',
   's.tsuboi@digi-man.com': '坪井',
@@ -147,6 +151,8 @@ const MEMBER_NAME_MAP = {
   's.yamamoto@digi-man.com': '山本',
   's.tanaka@digi-man.com': '田中颯汰',
   'j.nogami@digi-man.com': '野上',
+  'a.echigo@digi-man.com': '越後',
+  'y.matsuzaka@digi-man.com': '松坂',
 };
 
 // スプレッドシート案件名 → DB正規名マッピング
