@@ -1227,7 +1227,7 @@ function renderMorning(filter) {
     renderMrnPickerBar();
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
-    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '16500000');
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '16000000');
     const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
 
     // 営業日
@@ -2175,7 +2175,7 @@ function renderMonthlyTrendTable() {
     }
     months.reverse(); // 直近を上に
     const activeProjectNames = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
-    const settingsDefault = parseInt(settingsMap.monthly_target_total || '16500000');
+    const settingsDefault = parseInt(settingsMap.monthly_target_total || '16000000');
 
     const rows = months.map(ym => {
         const excluded = getExcludedMembers(ym);
@@ -2415,7 +2415,7 @@ function renderManagement(filter) {
     destroyMgmtCharts();
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
-    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '16500000');
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '16000000');
     const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
     // キャンセル率デフォルト 15%（着地ヨミ計算用）
     const RESKED_CANCEL_RATE = 0.15;
@@ -3129,7 +3129,7 @@ function renderIndividualAnalysis(filter) {
 function renderOverview(perfData, appoData, execAppoData, filter) {
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
-    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '16500000');
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '16000000');
     const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
 
     // 稼働実績集計（performance_rawdata）
@@ -4943,7 +4943,7 @@ function renderSettings() {
     const mtEl = document.getElementById('settingMonthlyTarget');
     if (crEl) crEl.value = settingsMap.cancel_rate_default || '0.8';
     if (frEl) frEl.value = settingsMap.next_month_flow_rate || '0.5';
-    if (mtEl) mtEl.value = settingsMap.monthly_target_total || '16500000';
+    if (mtEl) mtEl.value = settingsMap.monthly_target_total || '16000000';
 
     // メンバー管理テーブル
     let memberRows = '';

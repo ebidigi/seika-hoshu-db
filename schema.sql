@@ -272,5 +272,5 @@ CREATE TABLE IF NOT EXISTS feedback_requests (
 -- 初期データ: デフォルト設定
 INSERT OR IGNORE INTO settings (key, value) VALUES ('cancel_rate_default', '0.8');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('next_month_flow_rate', '0.5');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_target_total', '16500000');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_target_total', '16000000');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_target_total', '9000000');
