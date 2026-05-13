@@ -34,6 +34,7 @@ let editingMemberId = null;
 let editingProjectId = null;
 let teamHistoryData = []; // member_team_history 全データ
 let executionAppoData = []; // 当月実施予定のアポ（前月以前取得含む）
+let historicalAppoData = []; // 2025-07以降の全アポ（案件別ステータス集計用）
 let dailyPlansData = []; // 予定報告データ
 let dailyTargetsData = []; // 日別目標
 let weeklyTargetsData = []; // 週別目標
@@ -237,6 +238,8 @@ const MEMBER_NAME_NORMALIZE = {
     '中村凌': '中村り', '中村 凌': '中村り', '@中村凌/nakamura ryo': '中村り',
     '生井響': '生井', '生井 響': '生井', '@生井 響': '生井',
     '海老根涼太': '海老根', '海老根 涼太': '海老根', '@海老根涼太/ebine ryota': '海老根',
+    '越後敦也': '越後', '越後 敦也': '越後', '@越後敦也/echigo atsuya': '越後',
+    '松坂有志': '松坂', '松坂 有志': '松坂', '@松坂有志/matsuzaka yushi': '松坂',
     // メールアドレス → DB正規名
     'k.matsui@digi-man.com': '松居',
     's.tsuboi@digi-man.com': '坪井',
@@ -265,6 +268,8 @@ const MEMBER_NAME_NORMALIZE = {
     't.sakai@digi-man.com': '堺',
     'k.kikuchi@digi-man.com': '菊池',
     'k.miyoshi@digi-man.com': '三善',
+    'a.echigo@digi-man.com': '越後',
+    'y.matsuzaka@digi-man.com': '松坂',
 };
 
 function normalizeMemberName(name) {
@@ -556,6 +561,7 @@ async function loadAllData() {
 
         await loadMonthData();
         loadMappings();
+        loadHistoricalAppointments();
 
         document.getElementById('lastUpdated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
 
@@ -686,8 +692,6 @@ function refreshData() {
 }
 
 // ==================== レンダリング統合 ====================
-let currentAnalysisSub = 'performance';
-
 function renderAll() {
     const filter = getFilters();
     const filteredPerf = filterPerformance(performanceData, filter);
@@ -701,7 +705,6 @@ function renderAll() {
 
     // 他のタブはフィルター適用
     renderAppointments();
-    renderAnalysisNew(noFilter);
     renderProjects();
     renderSettings();
 }
@@ -1210,7 +1213,7 @@ function renderMorning(filter) {
     renderMrnPickerBar();
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
-    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '16500000');
     const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
 
     // 営業日
@@ -2032,8 +2035,105 @@ function destroyMgmtCharts() {
     Object.keys(mgmtCharts).forEach(k => { if (mgmtCharts[k]) { mgmtCharts[k].destroy(); delete mgmtCharts[k]; } });
 }
 
+// 2025-07以降の全アポを軽量取得（案件別ステータス集計用）
+async function loadHistoricalAppointments() {
+    try {
+        const data = await queryTurso(
+            "SELECT acquisition_date, scheduled_date, member_name, project_name, status, amount FROM appointments WHERE acquisition_date >= '2025-07-01' ORDER BY acquisition_date",
+            []
+        );
+        normalizeDataMemberNames(data);
+        historicalAppoData = deduplicateAppointments(data);
+        if (document.getElementById('mgmtHistoricalStatus')) {
+            renderHistoricalProjectStatus();
+        }
+    } catch (e) {
+        console.error('履歴アポ読み込み失敗:', e);
+    }
+}
+
+// 2025-07以降の案件別ステータス集計を描画（経営タブ最下部）
+function renderHistoricalProjectStatus() {
+    const container = document.getElementById('mgmtHistoricalStatus');
+    if (!container) return;
+    if (!historicalAppoData || historicalAppoData.length === 0) {
+        // textContent for plain text — 安全
+        container.textContent = '読み込み中...';
+        return;
+    }
+    const STATUSES = ['未確認', '実施', 'リスケ', 'キャンセル'];
+    const grouped = {};
+    historicalAppoData.forEach(a => {
+        const proj = a.project_name || '(未指定)';
+        if (!grouped[proj]) grouped[proj] = { 未確認: 0, 実施: 0, リスケ: 0, キャンセル: 0, total: 0, amount: 0 };
+        const st = STATUSES.includes(a.status) ? a.status : '未確認';
+        grouped[proj][st] += 1;
+        grouped[proj].total += 1;
+        grouped[proj].amount += parseFloat(a.amount) || 0;
+    });
+    const rows = Object.entries(grouped).sort((a, b) => b[1].total - a[1].total);
+    const totals = { 未確認: 0, 実施: 0, リスケ: 0, キャンセル: 0, total: 0, amount: 0 };
+    rows.forEach(([, v]) => { STATUSES.forEach(s => totals[s] += v[s]); totals.total += v.total; totals.amount += v.amount; });
+
+    // DOM 構築（escapeHtml は他箇所と同様、案件名のサニタイズに使用）
+    const parts = [];
+    parts.push('<div style="display:flex;justify-content:space-between;align-items:baseline;margin:28px 0 8px;">');
+    parts.push('<div class="section-title" style="margin:0;border:none;padding:0;">案件別ステータス集計 <span style="font-size:0.75rem;color:var(--text-light);font-weight:normal;margin-left:8px;">2025-07 〜 現在 / 取得日ベース</span></div>');
+    parts.push('<div style="font-size:0.8rem;color:var(--text-light);">全' + totals.total.toLocaleString() + '件</div>');
+    parts.push('</div>');
+    parts.push('<div style="overflow-x:auto;"><table class="data-table"><thead><tr>');
+    parts.push('<th>案件名</th><th class="text-right">合計</th>');
+    parts.push('<th class="text-right" style="background:#f0f4ff;">実施</th>');
+    parts.push('<th class="text-right" style="background:#fff8e6;">未確認</th>');
+    parts.push('<th class="text-right" style="background:#fffbe6;">リスケ</th>');
+    parts.push('<th class="text-right" style="background:#fdf2f0;color:#c0392b;">キャンセル</th>');
+    parts.push('<th class="text-right">実施率</th><th class="text-right">キャンセル率</th><th class="text-right">取得金額合計</th>');
+    parts.push('</tr></thead><tbody>');
+    rows.forEach(([name, v]) => {
+        const execRate = v.total > 0 ? (v['実施'] / v.total * 100).toFixed(1) + '%' : '-';
+        const cancelRate = v.total > 0 ? (v['キャンセル'] / v.total * 100).toFixed(1) + '%' : '-';
+        const cancelColor = v['キャンセル'] > 0 && v.total > 0 && (v['キャンセル']/v.total) >= 0.15 ? '#c0392b' : 'inherit';
+        parts.push('<tr>');
+        parts.push('<td style="font-weight:600;">' + escapeHtml(name) + '</td>');
+        parts.push('<td class="text-right">' + v.total.toLocaleString() + '</td>');
+        parts.push('<td class="text-right" style="background:#f8faff;">' + v['実施'].toLocaleString() + '</td>');
+        parts.push('<td class="text-right" style="background:#fffdf5;">' + v['未確認'].toLocaleString() + '</td>');
+        parts.push('<td class="text-right" style="background:#fffdf5;">' + v['リスケ'].toLocaleString() + '</td>');
+        parts.push('<td class="text-right" style="background:#fdf8f7;color:#c0392b;">' + v['キャンセル'].toLocaleString() + '</td>');
+        parts.push('<td class="text-right">' + execRate + '</td>');
+        parts.push('<td class="text-right" style="color:' + cancelColor + ';">' + cancelRate + '</td>');
+        parts.push('<td class="text-right">¥' + Math.round(v.amount).toLocaleString() + '</td>');
+        parts.push('</tr>');
+    });
+    const tExecRate = totals.total > 0 ? (totals['実施'] / totals.total * 100).toFixed(1) + '%' : '-';
+    const tCancelRate = totals.total > 0 ? (totals['キャンセル'] / totals.total * 100).toFixed(1) + '%' : '-';
+    parts.push('</tbody><tfoot><tr style="font-weight:600;">');
+    parts.push('<td>合計</td>');
+    parts.push('<td class="text-right">' + totals.total.toLocaleString() + '</td>');
+    parts.push('<td class="text-right" style="background:#f0f4ff;">' + totals['実施'].toLocaleString() + '</td>');
+    parts.push('<td class="text-right" style="background:#fff8e6;">' + totals['未確認'].toLocaleString() + '</td>');
+    parts.push('<td class="text-right" style="background:#fffbe6;">' + totals['リスケ'].toLocaleString() + '</td>');
+    parts.push('<td class="text-right" style="background:#fdf2f0;color:#c0392b;">' + totals['キャンセル'].toLocaleString() + '</td>');
+    parts.push('<td class="text-right">' + tExecRate + '</td>');
+    parts.push('<td class="text-right">' + tCancelRate + '</td>');
+    parts.push('<td class="text-right">¥' + Math.round(totals.amount).toLocaleString() + '</td>');
+    parts.push('</tr></tfoot></table></div>');
+    container.innerHTML = parts.join('');
+}
+
+// 案件別詳細テーブル: メンバー別内訳サブ行のトグル表示
+function toggleProjMemberBreakdown(projIdx) {
+    const rows = document.querySelectorAll(`.proj-member-row[data-proj-idx="${projIdx}"]`);
+    if (rows.length === 0) return;
+    const expand = rows[0].style.display === 'none';
+    rows.forEach(r => { r.style.display = expand ? '' : 'none'; });
+    const btn = document.querySelector(`.proj-toggle[data-proj-idx="${projIdx}"]`);
+    if (btn) btn.textContent = expand ? '▼' : '▶';
+}
+
 // ゲージチャート描画（半円doughnut + 標準進捗マーカー）
-function createGaugeChart(canvasId, value, max, standardPct, label, subLabel) {
+// breakdown: [{name, value}] を渡すと色付き弧をホバーした時にメンバー別内訳をツールチップ表示
+function createGaugeChart(canvasId, value, max, standardPct, label, subLabel, breakdown) {
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     const pct = max > 0 ? Math.min(value / max, 1.2) : 0;
@@ -2105,14 +2205,36 @@ function createGaugeChart(canvasId, value, max, standardPct, label, subLabel) {
             cutout: '72%',
             layout: { padding: { top: 0 } },
             plugins: {
-                tooltip: { enabled: false },
+                tooltip: (breakdown && breakdown.length > 0) ? {
+                    enabled: true,
+                    displayColors: false,
+                    backgroundColor: '#1a1a1a',
+                    titleColor: '#ffffff',
+                    bodyColor: '#ffffff',
+                    titleFont: { size: 11, family: '"Noto Sans JP"', weight: '700' },
+                    bodyFont: { size: 11, family: '"Noto Sans JP"' },
+                    padding: 10,
+                    yAlign: 'bottom',
+                    caretSize: 6,
+                    callbacks: {
+                        title: () => `${label} 内訳（合計 ¥${value.toLocaleString()}）`,
+                        label: () => '',
+                        afterBody: () => {
+                            const sorted = [...breakdown].filter(b => b.value > 0).sort((a, b) => b.value - a.value);
+                            if (sorted.length === 0) return ['（取得実績なし）'];
+                            return sorted.map(b => `${b.name}: ¥${Math.round(b.value).toLocaleString()}`);
+                        }
+                    },
+                    filter: (item) => item.dataIndex === 0,
+                } : { enabled: false },
                 legend: { display: false },
             },
             layout: { padding: { top: 0, bottom: 0 } },
         },
         plugins: [needlePlugin, {
             id: 'gaugeCenter_' + canvasId,
-            afterDraw(chart) {
+            // afterDatasetsDraw はツールチップより前に走るため、ホバー時にテキストが上にかぶらない
+            afterDatasetsDraw(chart) {
                 const { ctx: c, chartArea } = chart;
                 const cx = (chartArea.left + chartArea.right) / 2;
                 const cy = chartArea.bottom;
@@ -2187,7 +2309,7 @@ function renderManagement(filter) {
     destroyMgmtCharts();
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
-    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '16500000');
     const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
     // キャンセル率デフォルト 15%（着地ヨミ計算用）
     const RESKED_CANCEL_RATE = 0.15;
@@ -2206,8 +2328,6 @@ function renderManagement(filter) {
     const acquisitionAmount = allAppo.reduce((s, a) => s + (a.amount || 0), 0);
     const execConfirmed = allExecAppo.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
     const execUnconfirmed = allExecAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
-    const execCancelledAmt = allExecAppo.filter(a => a.status === 'キャンセル').reduce((s, a) => s + (a.amount || 0), 0);
-    const execRescheduleAmt = allExecAppo.filter(a => a.status === 'リスケ').reduce((s, a) => s + (a.amount || 0), 0);
 
     const { elapsed, total: totalDays } = getBusinessDays(ym);
     const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
@@ -2219,28 +2339,10 @@ function renderManagement(filter) {
     const acqRate = periodTarget > 0 ? Math.round(acquisitionAmount / periodTarget * 1000) / 10 : 0;
     const execRate = periodExecTarget > 0 ? Math.round(execConfirmed / periodExecTarget * 1000) / 10 : 0;
 
-    // 実施見込内訳
-    const allExecAppoActive = allExecAppo.filter(a => a.status === '実施' || a.status === '未確認');
-    const currentMonthExecAmt = allExecAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-    const prevMonthExecAmt = allExecAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-
     // 着地ヨミ = 実施確定 + 未確認 × (1 - キャンセル率)
     const execForecast = execConfirmed + Math.round(execUnconfirmed * (1 - RESKED_CANCEL_RATE));
     const forecastDiff = execForecast - periodExecTarget;
     const forecastColor = forecastDiff >= 0 ? '#86aaec' : '#ef947a';
-
-    // アポ実施タイミング内訳（全アポ対象: 取得月×実施月の組み合わせ）
-    const allAppoActive = allAppo.filter(a => a.status !== 'キャンセル');
-    // 前月以前取得→当月実施
-    const timingPrevToThis = allExecAppoActive.filter(a => a.acquisition_date && !a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-    // 当月取得→当月実施
-    const timingThisToThis = allExecAppoActive.filter(a => a.acquisition_date && a.acquisition_date.startsWith(ym)).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-    // 当月取得→来月以降実施（当月取得アポのうち、実施予定が来月以降 or 実施予定なし）
-    const timingThisToFuture = allAppoActive.filter(a => {
-        if (!a.acquisition_date || !a.acquisition_date.startsWith(ym)) return false;
-        return !a.scheduled_date || !a.scheduled_date.startsWith(ym);
-    }).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-    const timingTotal = timingPrevToThis + timingThisToThis + timingThisToFuture;
 
     // 全体KPI
     const totalCalls = sum(allPerf, 'call_count');
@@ -2341,7 +2443,8 @@ function renderManagement(filter) {
         <th class="text-right">1時間あたり架電数</th>
     </tr></thead><tbody>`;
     let ttAcq = 0, ttExec = 0, ttAmt = 0, ttCancel = 0, ttCalls = 0, ttPr = 0, ttAppoP = 0, ttHours = 0;
-    capData.forEach(c => {
+    const BREAKDOWN_MEMBERS = ['松居','山本','坪井','中村た','野上','堀切','越後','松坂','清水','JB','轟','浦上'];
+    capData.forEach((c, projIdx) => {
         ttAcq += c.acquiredCount;
         ttExec += c.execCount;
         ttAmt += c.acqAmount;
@@ -2350,8 +2453,8 @@ function renderManagement(filter) {
         ttPr += c.prCount;
         ttAppoP += c.appoCountPerf;
         ttHours += c.callHours;
-        projTableHtml += `<tr>
-            <td style="font-weight:600;">${escapeHtml(c.name)}</td>
+        projTableHtml += `<tr class="proj-row" data-proj-idx="${projIdx}">
+            <td style="font-weight:600;"><button class="proj-toggle" onclick="toggleProjMemberBreakdown(${projIdx})" data-proj-idx="${projIdx}" style="margin-right:6px;border:none;background:none;cursor:pointer;font-size:0.7rem;color:#666;width:14px;padding:0;">▶</button>${escapeHtml(c.name)}</td>
             <td class="text-right">¥${c.unitPrice.toLocaleString()}</td>
             <td class="text-right">${c.acquiredCount}件</td>
             <td class="text-right">${c.execCount}件</td>
@@ -2367,6 +2470,60 @@ function renderManagement(filter) {
             <td class="text-right">${c.prToAppo === '-' ? '-' : c.prToAppo + '%'}</td>
             <td class="text-right">${c.callsPerHour}</td>
         </tr>`;
+
+        // メンバー別内訳サブ行（デフォルト非表示）
+        // 指定12名を常に表示。それ以外で当該案件にデータがあるメンバーは「その他」として末尾に追加
+        const projAppoAll = allAppo.filter(d => d.project_name === c.name);
+        const projExecAll = allExecAppo.filter(d => d.project_name === c.name);
+        const projPerfAll = allPerf.filter(d => d.project_name === c.name);
+        const otherMembers = new Set();
+        projAppoAll.forEach(d => { if (d.member_name && !BREAKDOWN_MEMBERS.includes(d.member_name)) otherMembers.add(d.member_name); });
+        projExecAll.forEach(d => { if (d.member_name && !BREAKDOWN_MEMBERS.includes(d.member_name)) otherMembers.add(d.member_name); });
+        projPerfAll.forEach(d => { if (d.member_name && !BREAKDOWN_MEMBERS.includes(d.member_name)) otherMembers.add(d.member_name); });
+        const renderList = [
+            ...BREAKDOWN_MEMBERS.map(n => ({ name: n, isOther: false })),
+            ...[...otherMembers].sort().map(n => ({ name: n, isOther: true })),
+        ];
+        renderList.forEach(({ name: memberName, isOther }) => {
+            const mAppo = projAppoAll.filter(d => d.member_name === memberName);
+            const mExec = projExecAll.filter(d => d.member_name === memberName);
+            const mPerf = projPerfAll.filter(d => d.member_name === memberName);
+            const mAcqCount = mAppo.length;
+            const mExecCount = mExec.length;
+            const mCalls = sum(mPerf, 'call_count');
+            const mAcqAmt = c.unitPrice * mAcqCount;
+            const mCancel = mExec.filter(a => a.status === 'キャンセル').length;
+            const mCancelRate = mExecCount > 0 ? Math.round(mCancel / mExecCount * 100) : 0;
+            const mPr = sum(mPerf, 'pr_count');
+            const mAppoP = sum(mPerf, 'appointment_count');
+            const mHours = sum(mPerf, 'call_hours');
+            const mCallToAppo = mCalls > 0 ? (mAppoP / mCalls * 100).toFixed(1) + '%' : '-';
+            const mPrRate = mCalls > 0 ? (mPr / mCalls * 100).toFixed(1) + '%' : '-';
+            const mPrToAppo = mPr > 0 ? (mAppoP / mPr * 100).toFixed(1) + '%' : '-';
+            const mCallsPerHour = mHours > 0 ? (mCalls / mHours).toFixed(1) : '-';
+            const isEmpty = mAcqCount === 0 && mExecCount === 0 && mCalls === 0;
+            // 「その他」枠は当該案件にデータがある実在メンバーのみ表示（ノイズ低減）
+            if (isOther && isEmpty) return;
+            const rowColor = isEmpty ? '#bbb' : (isOther ? '#666' : '#555');
+            const labelPrefix = isOther ? '└ ' : '└ ';
+            projTableHtml += `<tr class="proj-member-row" data-proj-idx="${projIdx}" style="display:none;background:#fbfcfe;font-size:0.78rem;color:${rowColor};">
+                <td style="padding-left:34px;color:${rowColor};">${labelPrefix}${escapeHtml(memberName)}${isOther ? ' <span style="font-size:0.65rem;color:#aaa;">(その他)</span>' : ''}</td>
+                <td class="text-right">-</td>
+                <td class="text-right">${mAcqCount}件</td>
+                <td class="text-right">${mExecCount}件</td>
+                <td class="text-right">¥${mAcqAmt.toLocaleString()}</td>
+                <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${mCancel}件</td>
+                <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${mCancel > 0 ? mCancelRate + '%' : '-'}</td>
+                <td class="text-right">${mCalls.toLocaleString()}</td>
+                <td class="text-right">${mPr.toLocaleString()}</td>
+                <td class="text-right">${mAppoP.toLocaleString()}</td>
+                <td class="text-right">${mHours.toFixed(1)}h</td>
+                <td class="text-right">${mCallToAppo}</td>
+                <td class="text-right">${mPrRate}</td>
+                <td class="text-right">${mPrToAppo}</td>
+                <td class="text-right">${mCallsPerHour}</td>
+            </tr>`;
+        });
     });
     const ttCallToAppo = ttCalls > 0 ? (ttAppoP / ttCalls * 100).toFixed(1) + '%' : '-';
     const ttPrRate = ttCalls > 0 ? (ttPr / ttCalls * 100).toFixed(1) + '%' : '-';
@@ -2434,28 +2591,6 @@ function renderManagement(filter) {
         </div>
     </div>
 
-    <!-- 円グラフ2つ -->
-    <div class="mgmt-pies-row">
-        <div class="mgmt-pie-wrap">
-            <div class="mgmt-pie-title">実施ステータス内訳</div>
-            <div style="position:relative;height:220px;"><canvas id="mgmtPieExec"></canvas></div>
-            <div class="mgmt-pie-detail" id="mgmtPieDetail"></div>
-            <div class="mgmt-pie-formula">確定 + 未確認 + リスケ + キャンセル</div>
-        </div>
-        <div class="mgmt-pie-wrap">
-            <div class="mgmt-pie-title">着地ヨミ内訳</div>
-            <div style="position:relative;height:220px;"><canvas id="mgmtPieYomi"></canvas></div>
-            <div class="mgmt-pie-detail" id="mgmtPieYomiDetail"></div>
-            <div class="mgmt-pie-formula">確定 + 未確認（リスケ・キャンセル除外）</div>
-        </div>
-        <div class="mgmt-pie-wrap">
-            <div class="mgmt-pie-title">アポ実施タイミング内訳</div>
-            <div style="position:relative;height:220px;"><canvas id="mgmtPieTiming"></canvas></div>
-            <div class="mgmt-pie-detail" id="mgmtPieTimingDetail"></div>
-            <div class="mgmt-pie-formula">前月越し実施 + 当月取得実施 + 当月取得来月以降</div>
-        </div>
-    </div>
-
     <!-- 全体KPI（当月 vs 前月） -->
     ${(() => {
         const prevYM = getPrevYM(ym);
@@ -2464,13 +2599,21 @@ function renderManagement(filter) {
         const intFmt = v => Math.round(v).toLocaleString();
         const pctFmt = v => v.toFixed(1);
         const yenFmt = v => '¥' + Math.round(v).toLocaleString();
+        // 前月比は「当月の経過営業日数」と同じ営業日数で前月を切り詰めて比較
+        const prevCutoffDate = elapsed > 0 ? getNthBusinessDay(prevYM, elapsed) : null;
+        const currCutoffDate = elapsed > 0 ? getNthBusinessDay(ym, elapsed) : null;
+        const cmpNote = prevCutoffDate && currCutoffDate
+            ? `※ 前月比は当月（${ym}-01 〜 ${currCutoffDate}, ${elapsed}営業日）と前月の同営業日数（${prevYM}-01 〜 ${prevCutoffDate}）を比較`
+            : `※ 前月（${prevYM}）の同じ営業日数で比較`;
         const card = (label, currVal, prevVal, fmt, opts = {}) => `
             <div class="mgmt-kpi-item">
                 <div class="mgmt-kpi-label">${label}</div>
                 <div class="mgmt-kpi-val">${fmt(currVal)}${opts.suffix || ''}</div>
                 <div class="mgmt-kpi-prev">前月 ${fmt(prevVal)}${opts.suffix || ''} ${kpiDiffBadge(currVal, prevVal, { invert: opts.invert, fmt, suffix: opts.suffix })}</div>
             </div>`;
-        return `<div class="mgmt-kpi-numbers">
+        return `
+        <div style="font-size:0.75rem;color:var(--text-light);margin:18px 0 6px;padding:0 2px;">${escapeHtml(cmpNote)}</div>
+        <div class="mgmt-kpi-numbers">
             ${card('架電数', curr.calls, prev.calls, intFmt)}
             ${card('着電数', curr.pr, prev.pr, intFmt)}
             ${card('アポ数', curr.appoCnt, prev.appoCnt, intFmt)}
@@ -2493,6 +2636,32 @@ function renderManagement(filter) {
 
     <!-- 案件別 詳細テーブル -->
     <div class="section-title" style="margin-top:28px;">案件別 詳細</div>
+    ${(() => {
+        const totalAcqTarget = monthlyTarget;
+        const totalAcqActual = capData.reduce((s, c) => s + c.acqAmount, 0);
+        const achieveRate = totalAcqTarget > 0 ? (totalAcqActual / totalAcqTarget * 100).toFixed(1) : '0';
+        const barWidth = Math.min(parseFloat(achieveRate), 100);
+        const barColor = parseFloat(achieveRate) >= standardProgress ? '#86aaec' : parseFloat(achieveRate) >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
+        return `<div class="acq-summary-banner" style="display:flex;align-items:center;gap:24px;background:#f8faff;border:1px solid #e3e8f0;border-radius:8px;padding:14px 18px;margin-bottom:12px;flex-wrap:wrap;">
+            <div>
+                <div style="font-size:0.75rem;color:var(--text-light);">全案件 取得目標</div>
+                <div style="font-size:1.25rem;font-weight:700;">¥${totalAcqTarget.toLocaleString()}</div>
+            </div>
+            <div>
+                <div style="font-size:0.75rem;color:var(--text-light);">全案件 取得実績</div>
+                <div style="font-size:1.25rem;font-weight:700;color:${barColor};">¥${totalAcqActual.toLocaleString()}</div>
+            </div>
+            <div style="flex:1;min-width:200px;">
+                <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-light);margin-bottom:4px;">
+                    <span>達成率 ${achieveRate}%</span>
+                    <span style="font-size:0.7rem;">※キャンセル無関係（取得ベース）</span>
+                </div>
+                <div style="height:8px;background:#eef0f4;border-radius:4px;overflow:hidden;">
+                    <div style="height:100%;width:${barWidth}%;background:${barColor};border-radius:4px;"></div>
+                </div>
+            </div>
+        </div>`;
+    })()}
     ${projTableHtml}`;
 
     document.getElementById('mgmtSalesProgress').innerHTML = html;
@@ -2505,127 +2674,19 @@ function renderManagement(filter) {
     document.getElementById('mgmtCapProgress').innerHTML = '';
     document.getElementById('mgmtAssignmentAssess').innerHTML = '';
 
+    // 2025-07以降の案件別ステータス集計（履歴データが既に読み込み済みなら描画）
+    renderHistoricalProjectStatus();
+
     // ========== チャート描画 ==========
-    createGaugeChart('mgmtGaugeAcq', acquisitionAmount, periodTarget, standardProgress, '取得金額', `達成率 ${acqRate}%`);
-    createGaugeChart('mgmtGaugeExec', execConfirmed, periodExecTarget, standardProgress, '実施確定', `達成率 ${execRate}%`);
+    const acqBreakdown = memberData.map(d => ({ name: d.name, value: d.actual }));
+    const execBreakdown = activeMembers.map(m => ({
+        name: m.member_name,
+        value: allExecAppo.filter(a => a.member_name === m.member_name && a.status === '実施').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0),
+    }));
+    createGaugeChart('mgmtGaugeAcq', acquisitionAmount, periodTarget, standardProgress, '取得金額', `達成率 ${acqRate}%`, acqBreakdown);
+    createGaugeChart('mgmtGaugeExec', execConfirmed, periodExecTarget, standardProgress, '実施確定', `達成率 ${execRate}%`, execBreakdown);
 
     // 円グラフ中心テキスト描画プラグイン
-    function pieCenterPlugin(centerText) {
-        return {
-            id: 'pieCenter_' + Math.random().toString(36).slice(2),
-            afterDraw(chart) {
-                const { ctx: c, chartArea } = chart;
-                const cx = (chartArea.left + chartArea.right) / 2;
-                const cy = (chartArea.top + chartArea.bottom) / 2;
-                c.save();
-                c.textAlign = 'center';
-                c.textBaseline = 'middle';
-                c.font = '700 15px "Poppins", sans-serif';
-                c.fillStyle = '#1a1a1a';
-                c.fillText(centerText, cx, cy - 6);
-                c.font = '500 9px "Noto Sans JP"';
-                c.fillStyle = '#999';
-                c.fillText('合計', cx, cy + 10);
-                c.restore();
-            }
-        };
-    }
-
-    // 円グラフ: 実施ステータス内訳
-    const execPieTotal = execConfirmed + execUnconfirmed + execRescheduleAmt + execCancelledAmt;
-    const pieCtx = document.getElementById('mgmtPieExec');
-    if (pieCtx) {
-        mgmtCharts['mgmtPieExec'] = new Chart(pieCtx, {
-            type: 'doughnut',
-            data: {
-                labels: ['確定（実施）', '未確認', 'リスケ', 'キャンセル'],
-                datasets: [{ data: [execConfirmed, execUnconfirmed, execRescheduleAmt, execCancelledAmt], backgroundColor: ['#86aaec', '#b8d4f0', '#ede07d', '#ef947a'], borderWidth: 2, borderColor: '#fff' }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, cutout: '55%',
-                plugins: {
-                    legend: { position: 'bottom', labels: { font: { size: 10, family: '"Noto Sans JP"' }, padding: 8, usePointStyle: true } },
-                    tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ¥${ctx.parsed.toLocaleString()}` } },
-                    datalabels: { display: true, color: '#fff', font: { weight: '700', size: 12 }, formatter: (val, ctx) => { const total = ctx.dataset.data.reduce((a, b) => a + b, 0); return total > 0 && val > 0 ? (val / total * 100).toFixed(0) + '%' : ''; } }
-                },
-                onClick: (evt, elements) => {
-                    const detail = document.getElementById('mgmtPieDetail');
-                    if (elements.length > 0 && detail) {
-                        const idx = elements[0].index;
-                        const labels = ['確定（実施）', '未確認', 'リスケ', 'キャンセル'];
-                        const amounts = [execConfirmed, execUnconfirmed, execRescheduleAmt, execCancelledAmt];
-                        const notes = ['実施確定済の金額', '今後実施予定の未確認金額', '翌月に流れる可能性あり', '請求¥0'];
-                        detail.innerHTML = `<div class="mgmt-pie-detail-card"><strong>${labels[idx]}</strong>: ¥${amounts[idx].toLocaleString()}<br><span style="color:var(--text-light);font-size:0.75rem;">${notes[idx]}</span></div>`;
-                    }
-                }
-            },
-            plugins: [pieCenterPlugin('¥' + execPieTotal.toLocaleString())]
-        });
-    }
-
-    // 円グラフ: 着地ヨミ内訳（当月取得 vs 前月取得）
-    const yomiPieTotal = currentMonthExecAmt + prevMonthExecAmt;
-    const pieYomiCtx = document.getElementById('mgmtPieYomi');
-    if (pieYomiCtx) {
-        mgmtCharts['mgmtPieYomi'] = new Chart(pieYomiCtx, {
-            type: 'doughnut',
-            data: {
-                labels: ['当月取得 → 当月実施', '前月取得 → 当月実施'],
-                datasets: [{ data: [currentMonthExecAmt, prevMonthExecAmt], backgroundColor: ['#86aaec', '#c4b5fd'], borderWidth: 2, borderColor: '#fff' }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, cutout: '55%',
-                plugins: {
-                    legend: { position: 'bottom', labels: { font: { size: 10, family: '"Noto Sans JP"' }, padding: 8, usePointStyle: true } },
-                    tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ¥${ctx.parsed.toLocaleString()}` } },
-                    datalabels: { display: true, color: '#fff', font: { weight: '700', size: 13 }, formatter: (val, ctx) => { const total = ctx.dataset.data.reduce((a, b) => a + b, 0); return total > 0 && val > 0 ? (val / total * 100).toFixed(0) + '%' : ''; } }
-                },
-                onClick: (evt, elements) => {
-                    const detail = document.getElementById('mgmtPieYomiDetail');
-                    if (elements.length > 0 && detail) {
-                        const idx = elements[0].index;
-                        const labels = ['当月取得 → 当月実施', '前月取得 → 当月実施'];
-                        const amounts = [currentMonthExecAmt, prevMonthExecAmt];
-                        const total = currentMonthExecAmt + prevMonthExecAmt;
-                        const pctVal = total > 0 ? (amounts[idx] / total * 100).toFixed(1) : '0';
-                        detail.innerHTML = `<div class="mgmt-pie-detail-card"><strong>${labels[idx]}</strong>: ¥${amounts[idx].toLocaleString()}（${pctVal}%）</div>`;
-                    }
-                }
-            },
-            plugins: [pieCenterPlugin('¥' + yomiPieTotal.toLocaleString())]
-        });
-    }
-
-    // 円グラフ: アポ実施タイミング内訳
-    const pieTimingCtx = document.getElementById('mgmtPieTiming');
-    if (pieTimingCtx) {
-        mgmtCharts['mgmtPieTiming'] = new Chart(pieTimingCtx, {
-            type: 'doughnut',
-            data: {
-                labels: ['前月以前取得→当月実施', '当月取得→当月実施', '当月取得→来月以降実施'],
-                datasets: [{ data: [timingPrevToThis, timingThisToThis, timingThisToFuture], backgroundColor: ['#c4b5fd', '#86aaec', '#a8d8b9'], borderWidth: 2, borderColor: '#fff' }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, cutout: '55%',
-                plugins: {
-                    legend: { position: 'bottom', labels: { font: { size: 9, family: '"Noto Sans JP"' }, padding: 8, usePointStyle: true } },
-                    tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ¥${ctx.parsed.toLocaleString()}` } },
-                    datalabels: { display: true, color: '#fff', font: { weight: '700', size: 12 }, formatter: (val, ctx) => { const total = ctx.dataset.data.reduce((a, b) => a + b, 0); return total > 0 && val > 0 ? (val / total * 100).toFixed(0) + '%' : ''; } }
-                },
-                onClick: (evt, elements) => {
-                    const detail = document.getElementById('mgmtPieTimingDetail');
-                    if (elements.length > 0 && detail) {
-                        const idx = elements[0].index;
-                        const labels = ['前月以前取得→当月実施', '当月取得→当月実施', '当月取得→来月以降実施'];
-                        const amounts = [timingPrevToThis, timingThisToThis, timingThisToFuture];
-                        detail.innerHTML = `<div class="mgmt-pie-detail-card"><strong>${labels[idx]}</strong>: ¥${amounts[idx].toLocaleString()}</div>`;
-                    }
-                }
-            },
-            plugins: [pieCenterPlugin('¥' + timingTotal.toLocaleString())]
-        });
-    }
-
     // 横棒グラフ共通関数（高さ自動調整）
     function createHBar(canvasId, data, valueKey, formatFn, colorFn) {
         const sorted = [...data].sort((a, b) => b[valueKey] - a[valueKey]);
@@ -2767,25 +2828,7 @@ function renderManagement(filter) {
     }
 }
 
-// ==================== Tab: 詳細分析サブナビ ====================
-function switchAnalysisSub(sub) {
-    currentAnalysisSub = sub;
-    document.querySelectorAll('.analysis-sub-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.sub === sub);
-    });
-    document.querySelectorAll('.analysis-sub-content').forEach(el => {
-        el.classList.toggle('hidden', el.id !== `analysisSub-${sub}`);
-    });
-}
-
-// ==================== Tab: 詳細分析（BI版） ====================
-let analysisCompareData = null;
-const analysisCharts = {};
-function destroyAnalysisCharts() {
-    Object.keys(analysisCharts).forEach(k => { if (analysisCharts[k]) { analysisCharts[k].destroy(); delete analysisCharts[k]; } });
-}
-
-// 指標定義
+// ==================== 共通指標定義（朝礼の散布図などで使用） ====================
 const ANL_METRICS = [
     { key: 'calls', label: '架電数', fmt: v => v.toLocaleString(), unit: '' },
     { key: 'pr', label: '着電数', fmt: v => v.toLocaleString(), unit: '' },
@@ -2834,294 +2877,6 @@ function calcMemberStats(data, memberName, proj) {
     };
 }
 
-function renderAnalysisNew(filter) {
-    destroyAnalysisCharts();
-    const ym = filter.month;
-    const excluded = getExcludedMembers(ym);
-    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
-    const activeProjects = projectsData.filter(p => p.status === 'active');
-    const sortedMembers = [...activeMembers].sort((a, b) => a.member_name.localeCompare(b.member_name, 'ja'));
-    const memberOpts = sortedMembers.map(m => `<option value="${escapeHtml(m.member_name)}">${escapeHtml(m.member_name)}</option>`).join('');
-    const metricOpts = ANL_METRICS.map(m => `<option value="${m.key}">${m.label}</option>`).join('');
-
-    let html = `
-    <!-- コントロール -->
-    <div class="anl-controls">
-        <div class="anl-control-group">
-            <label>期間A</label>
-            <input type="date" id="anlStartA" value="${ym}-01">
-            <span>〜</span>
-            <input type="date" id="anlEndA" value="${getEndOfMonth(ym)}">
-        </div>
-        <div class="anl-control-group">
-            <label>比較期間B</label>
-            <input type="date" id="anlStartB" value="">
-            <span>〜</span>
-            <input type="date" id="anlEndB" value="">
-        </div>
-        <div class="anl-control-group">
-            <label>案件</label>
-            <select id="anlProjectFilter">
-                <option value="all">全案件</option>
-                ${activeProjects.map(p => `<option value="${escapeHtml(p.project_name)}">${escapeHtml(p.project_name)}</option>`).join('')}
-            </select>
-        </div>
-        <button class="anl-apply-btn" onclick="applyAnalysisFilter()">適用</button>
-    </div>
-
-    <!-- 上段: スコアカード -->
-    <div class="anl-scorecard-area">
-        <div class="anl-scorecard-header">
-            <select id="anlScoreMember" onchange="renderScorecard()">${memberOpts}</select>
-        </div>
-        <div class="anl-scorecard-grid" id="anlScorecardGrid"></div>
-    </div>
-
-    <!-- 中段: ヒートマップ -->
-    <div class="section-title" style="margin-top:24px;">全員 × 指標 ヒートマップ</div>
-    <div style="overflow-x:auto;" id="anlHeatmapWrap"></div>
-
-    <!-- 月別キャンセル率推移 -->
-    <div class="section-title" style="margin-top:24px;">月別 個人キャンセル率推移</div>
-    <div class="mgmt-chart-container" style="height:300px;"><canvas id="anlCancelTrendChart"></canvas></div>
-
-    <!-- 下段: 散布図 -->
-    <div class="section-title" style="margin-top:24px;">散布図
-        <div style="display:inline-flex;gap:8px;margin-left:12px;font-size:0.8rem;">
-            <label style="font-weight:500;">X軸</label><select id="anlScatterX" onchange="renderScatter()">${metricOpts}</select>
-            <label style="font-weight:500;">Y軸</label><select id="anlScatterY" onchange="renderScatter()"><option value="callToAppo">架→アポ率</option>${metricOpts}</select>
-            <label style="font-weight:500;">サイズ</label><select id="anlScatterSize" onchange="renderScatter()"><option value="amount">取得金額</option>${metricOpts}</select>
-        </div>
-    </div>
-    <div class="mgmt-chart-container" style="height:380px;"><canvas id="anlScatterChart"></canvas></div>`;
-
-    document.getElementById('analysisNewContent').innerHTML = html;
-    applyAnalysisFilter();
-}
-
-async function applyAnalysisFilter() {
-    const startA = document.getElementById('anlStartA')?.value;
-    const endA = document.getElementById('anlEndA')?.value;
-    const startB = document.getElementById('anlStartB')?.value;
-    const endB = document.getElementById('anlEndB')?.value;
-    if (!startA || !endA) return;
-
-    const dataA = await fetchPerfRange(startA, endA);
-    let dataB = null;
-    if (startB && endB) dataB = await fetchPerfRange(startB, endB);
-    analysisCompareData = { dataA, dataB, startA, endA, startB, endB };
-
-    renderScorecard();
-    renderHeatmap();
-    renderCancelTrend();
-    renderScatter();
-
-    initCustomSelects();
-}
-
-async function fetchPerfRange(start, end) {
-    const local = performanceData.filter(d => d.input_date >= start && d.input_date <= end);
-    if (local.length > 0) return local;
-    const data = await queryTurso("SELECT * FROM performance_rawdata WHERE input_date >= ? AND input_date <= ? ORDER BY input_date", [start, end]);
-    normalizeDataMemberNames(data);
-    return deduplicatePerformance(data);
-}
-
-// スコアカード
-function renderScorecard() {
-    if (!analysisCompareData) return;
-    const { dataA, dataB } = analysisCompareData;
-    const member = document.getElementById('anlScoreMember')?.value;
-    const proj = document.getElementById('anlProjectFilter')?.value;
-    if (!member) return;
-
-    const a = calcMemberStats(dataA, member, proj);
-    const b = dataB ? calcMemberStats(dataB, member, proj) : null;
-
-    let html = '';
-    ANL_METRICS.forEach(m => {
-        const valA = a[m.key];
-        const valB = b ? b[m.key] : null;
-        let diffHtml = '';
-        if (b) {
-            const diff = valA - valB;
-            if (Math.abs(diff) > 0.01) {
-                const color = diff > 0 ? '#86aaec' : '#ef947a';
-                const sign = diff > 0 ? '↑' : '↓';
-                const fmt = m.isRate ? Math.abs(diff).toFixed(1) + 'pt' : Math.abs(Math.round(diff)).toLocaleString();
-                diffHtml = `<div class="anl-sc-diff" style="color:${color};">${sign} ${fmt}</div>`;
-            } else {
-                diffHtml = `<div class="anl-sc-diff" style="color:var(--text-light);">→</div>`;
-            }
-        }
-        html += `<div class="anl-sc-tile">
-            <div class="anl-sc-label">${m.label}</div>
-            <div class="anl-sc-value">${m.fmt(valA)}</div>
-            ${diffHtml}
-        </div>`;
-    });
-    document.getElementById('anlScorecardGrid').innerHTML = html;
-}
-
-// レーダーチャート
-function renderRadar() {
-    if (!analysisCompareData) return;
-    if (analysisCharts['anlRadar']) { analysisCharts['anlRadar'].destroy(); }
-    const { dataA } = analysisCompareData;
-    const m1 = document.getElementById('anlRadarMember1')?.value;
-    const m2 = document.getElementById('anlRadarMember2')?.value;
-    const proj = document.getElementById('anlProjectFilter')?.value;
-    const excluded = getExcludedMembers(document.getElementById('filterMonth').value);
-    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
-
-    const s1 = calcMemberStats(dataA, m1, proj);
-    let s2;
-    if (m2 === 'avg') {
-        const allStats = activeMembers.map(m => calcMemberStats(dataA, m.member_name, proj));
-        s2 = {};
-        ANL_METRICS.forEach(m => { s2[m.key] = allStats.reduce((s, st) => s + st[m.key], 0) / allStats.length; });
-    } else {
-        s2 = calcMemberStats(dataA, m2, proj);
-    }
-
-    // 正規化: 全員の中での相対位置 (0-100)
-    const allStats = activeMembers.map(m => calcMemberStats(dataA, m.member_name, proj));
-    function normalize(key, val) {
-        const vals = allStats.map(s => s[key]);
-        const max = Math.max(...vals, 1);
-        return max > 0 ? val / max * 100 : 0;
-    }
-
-    const radarKeys = ['calls', 'pr', 'appo', 'amount', 'dailyCalls', 'hourly', 'callToPr', 'prToAppo', 'callToAppo'];
-    const radarLabels = radarKeys.map(k => ANL_METRICS.find(m => m.key === k)?.label || k);
-
-    const ctx = document.getElementById('anlRadarChart');
-    if (!ctx) return;
-    analysisCharts['anlRadar'] = new Chart(ctx, {
-        type: 'radar',
-        data: {
-            labels: radarLabels,
-            datasets: [
-                { label: m1, data: radarKeys.map(k => normalize(k, s1[k])), borderColor: '#86aaec', backgroundColor: 'rgba(134,170,236,0.2)', pointRadius: 3 },
-                { label: m2 === 'avg' ? '全員平均' : m2, data: radarKeys.map(k => normalize(k, s2[k])), borderColor: '#c4b5fd', backgroundColor: 'rgba(196,181,253,0.15)', pointRadius: 3, borderDash: [4, 3] }
-            ]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            scales: { r: { beginAtZero: true, max: 100, ticks: { display: false }, pointLabels: { font: { size: 10, family: '"Noto Sans JP"' } } } },
-            plugins: { legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true } } }
-        }
-    });
-}
-
-// ヒートマップ
-function renderHeatmap() {
-    if (!analysisCompareData) return;
-    const { dataA } = analysisCompareData;
-    const proj = document.getElementById('anlProjectFilter')?.value;
-    const excluded = getExcludedMembers(document.getElementById('filterMonth').value);
-    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
-
-    const allStats = activeMembers.map(m => ({ name: m.member_name, ...calcMemberStats(dataA, m.member_name, proj) }));
-
-    // 各指標のmin/max
-    const ranges = {};
-    ANL_METRICS.forEach(m => {
-        const vals = allStats.map(s => s[m.key]);
-        ranges[m.key] = { min: Math.min(...vals), max: Math.max(...vals, 1) };
-    });
-
-    function heatColor(key, val) {
-        const { min, max } = ranges[key];
-        const range = max - min || 1;
-        const ratio = (val - min) / range; // 0~1
-        // 青系グラデーション: 薄い→濃い
-        const r = Math.round(240 - ratio * 106); // 240→134
-        const g = Math.round(244 - ratio * 74);  // 244→170
-        const b = Math.round(248 - ratio * 12);  // 248→236
-        return `rgb(${r},${g},${b})`;
-    }
-
-    let html = `<table class="data-table anl-heatmap"><thead><tr><th>メンバー</th>`;
-    ANL_METRICS.forEach(m => { html += `<th class="text-right">${m.label}</th>`; });
-    html += `</tr></thead><tbody>`;
-
-    allStats.forEach(s => {
-        html += `<tr><td style="font-weight:600;white-space:nowrap;">${escapeHtml(s.name)}</td>`;
-        ANL_METRICS.forEach(m => {
-            const v = s[m.key];
-            // キャンセル率 30%以上は赤背景
-            const bg = (m.key === 'cancelRate' && v >= 30) ? 'var(--red-50)' : heatColor(m.key, v);
-            const textColor = (m.key === 'cancelRate' && v >= 30) ? 'var(--red-400)' : '';
-            html += `<td class="text-right" style="background:${bg};font-size:0.75rem;font-weight:600;${textColor ? 'color:' + textColor + ';' : ''}">${m.fmt(v)}</td>`;
-        });
-        html += `</tr>`;
-    });
-    html += `</tbody></table>`;
-    document.getElementById('anlHeatmapWrap').innerHTML = html;
-}
-
-// 月別キャンセル率推移チャート
-function renderCancelTrend() {
-    if (analysisCharts['anlCancelTrend']) { analysisCharts['anlCancelTrend'].destroy(); }
-    const ctx = document.getElementById('anlCancelTrendChart');
-    if (!ctx) return;
-
-    const excluded = getExcludedMembers(document.getElementById('filterMonth').value);
-    const activeMembers = membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name));
-
-    // 直近6ヶ月のラベルを生成
-    const now = new Date();
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        months.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
-    }
-
-    // キャンセル件数があるメンバーのみ対象
-    const membersWithCancel = activeMembers.filter(m => {
-        return appointmentsData.some(a => a.member_name === m.member_name && a.status === 'キャンセル');
-    });
-
-    const colors = ['#1155cc', '#e04f24', '#e8d335', '#00a2da', '#86aaec', '#ef947a', '#6dc6e5', '#437ce1', '#ec724e', '#ede07d'];
-
-    const datasets = membersWithCancel.map((m, i) => {
-        const data = months.map(ym => {
-            const monthAppo = appointmentsData.filter(a => a.member_name === m.member_name && a.acquisition_date && a.acquisition_date.startsWith(ym));
-            const cancelCount = monthAppo.filter(a => a.status === 'キャンセル').length;
-            return monthAppo.length > 0 ? Math.round(cancelCount / monthAppo.length * 1000) / 10 : null;
-        });
-        return {
-            label: m.member_name,
-            data: data,
-            borderColor: colors[i % colors.length],
-            backgroundColor: colors[i % colors.length] + '33',
-            tension: 0.3,
-            pointRadius: 4,
-            spanGaps: true,
-        };
-    }).filter(ds => ds.data.some(v => v !== null && v > 0));
-
-    if (datasets.length === 0) return;
-
-    analysisCharts['anlCancelTrend'] = new Chart(ctx, {
-        type: 'line',
-        data: { labels: months, datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'キャンセル率 (%)' }, ticks: { callback: v => v + '%' } },
-                x: { title: { display: true, text: '月' } }
-            },
-            plugins: {
-                legend: { position: 'bottom', labels: { font: { size: 11 } } },
-                tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y ?? '-') + '%' } }
-            }
-        }
-    });
-}
-
 // 散布図（共通描画関数）
 const SCATTER_COLORS = ['#86aaec', '#c4b5fd', '#ef947a', '#a8d8b9', '#ede07d', '#f0b8d0', '#90b8f8', '#b8d4f0', '#d4a8e0', '#f0c8a8', '#a8c8f0', '#c8e0a8', '#e0b8c8', '#b8e0d4', '#e0d4a8'];
 
@@ -3168,17 +2923,6 @@ function renderScatterChart(canvasId, chartStore, chartKey, perfData, xKey, yKey
             }
         }
     });
-}
-
-// 詳細分析タブ用ラッパー
-function renderScatter() {
-    if (!analysisCompareData) return;
-    const { dataA } = analysisCompareData;
-    const proj = document.getElementById('anlProjectFilter')?.value;
-    const xKey = document.getElementById('anlScatterX')?.value || 'calls';
-    const yKey = document.getElementById('anlScatterY')?.value || 'callToAppo';
-    const sizeKey = document.getElementById('anlScatterSize')?.value || 'amount';
-    renderScatterChart('anlScatterChart', analysisCharts, 'anlScatter', dataA, xKey, yKey, sizeKey, proj);
 }
 
 // 朝礼タブ用ラッパー
@@ -3260,7 +3004,7 @@ function renderIndividualAnalysis(filter) {
 function renderOverview(perfData, appoData, execAppoData, filter) {
     const ym = filter.month;
     const totalTarget = getTarget('total', 'all', ym);
-    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '9000000');
+    const monthlyTarget = totalTarget ? totalTarget.appointment_amount_target : parseInt(settingsMap.monthly_target_total || '16500000');
     const executionTarget = totalTarget ? (totalTarget.execution_target || monthlyTarget) : monthlyTarget;
 
     // 稼働実績集計（performance_rawdata）
@@ -5074,7 +4818,7 @@ function renderSettings() {
     const mtEl = document.getElementById('settingMonthlyTarget');
     if (crEl) crEl.value = settingsMap.cancel_rate_default || '0.8';
     if (frEl) frEl.value = settingsMap.next_month_flow_rate || '0.5';
-    if (mtEl) mtEl.value = settingsMap.monthly_target_total || '9000000';
+    if (mtEl) mtEl.value = settingsMap.monthly_target_total || '16500000';
 
     // メンバー管理テーブル
     let memberRows = '';
@@ -5804,7 +5548,7 @@ function switchTab(tab) {
     // 朝礼・経営タブではフィルターを非表示
     const filters = document.getElementById('globalFilters');
     if (filters) {
-        filters.style.display = (tab === 'morning' || tab === 'management' || tab === 'analysis') ? 'none' : 'flex';
+        filters.style.display = (tab === 'morning' || tab === 'management') ? 'none' : 'flex';
     }
 
     // タブ切替時にチーム・メンバーフィルターをリセット（タブ間の影響を防止）
@@ -5890,7 +5634,27 @@ function getPrevYM(ym) {
     return `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
+// 指定月の N 営業日目の日付(YYYY-MM-DD)を返す
+// （N=現在月で経過した営業日数 → 前月の同じ営業日インデックスに対応する日付）
+function getNthBusinessDay(ym, n) {
+    if (n <= 0) return null;
+    const [y, m] = ym.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    let count = 0;
+    for (let d = 1; d <= lastDay; d++) {
+        const date = new Date(y, m - 1, d);
+        const dateStr = formatDate(date);
+        const dow = date.getDay();
+        if (dow === 0 || dow === 6 || holidaysSet.has(dateStr)) continue;
+        count++;
+        if (count === n) return dateStr;
+    }
+    // n が当該月の総営業日を超える場合は月末営業日を返す
+    return null;
+}
+
 // 指定月の全体KPIをまとめて算出（KPIカード用）
+// 前月比較のため、当月で経過した営業日数 N と同じだけ前月の冒頭から N 営業日分のデータと比較する
 function computeMonthKpis(ym) {
     const currentYM = (typeof document !== 'undefined' && document.getElementById('filterMonth')) ? document.getElementById('filterMonth').value : ym;
     // 当月以外（=前月）はloadMonthDataで別取得した軽量データを使う
@@ -5899,9 +5663,18 @@ function computeMonthKpis(ym) {
     const appoSrc = isPrev ? prevAppointmentsData : appointmentsData;
     const execSrc = isPrev ? prevExecutionAppoData : executionAppoData;
     const excluded = getExcludedMembers(ym);
-    const perf = perfSrc.filter(d => !excluded.includes(d.member_name) && d.input_date && d.input_date.startsWith(ym));
-    const appo = appoSrc.filter(d => !excluded.includes(d.member_name) && d.acquisition_date && d.acquisition_date.startsWith(ym));
-    const execAppo = execSrc.filter(d => !excluded.includes(d.member_name) && d.scheduled_date && d.scheduled_date.startsWith(ym));
+
+    // 営業日カットオフ: 前月データを当月経過営業日数まで切り詰める
+    let cutoff = null;
+    if (isPrev) {
+        const elapsed = getBusinessDays(currentYM).elapsed;
+        if (elapsed > 0) cutoff = getNthBusinessDay(ym, elapsed);
+    }
+    const inRange = (dateStr) => !cutoff || (dateStr && dateStr <= cutoff);
+
+    const perf = perfSrc.filter(d => !excluded.includes(d.member_name) && d.input_date && d.input_date.startsWith(ym) && inRange(d.input_date));
+    const appo = appoSrc.filter(d => !excluded.includes(d.member_name) && d.acquisition_date && d.acquisition_date.startsWith(ym) && inRange(d.acquisition_date));
+    const execAppo = execSrc.filter(d => !excluded.includes(d.member_name) && d.scheduled_date && d.scheduled_date.startsWith(ym) && inRange(d.scheduled_date));
 
     const calls = sum(perf, 'call_count');
     const pr = sum(perf, 'pr_count');
@@ -5970,9 +5743,9 @@ function getTarget(type, name, ym) {
 
 function getBusinessDays(ym) {
     const [y, m] = ym.split('-').map(Number);
-    // 標準進捗は昨日時点で計算
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
+    // 経過営業日は本日を含めてカウント（当月データには本日分も含まれるため）
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
     const lastDay = new Date(y, m, 0).getDate();
 
     let total = 0;
@@ -5987,7 +5760,7 @@ function getBusinessDays(ym) {
         if (dow === 0 || dow === 6 || holidaysSet.has(dateStr)) continue;
 
         total++;
-        if (date <= yesterday) elapsed++;
+        if (date <= today) elapsed++;
     }
 
     return { elapsed, total };

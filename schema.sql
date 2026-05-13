@@ -184,6 +184,9 @@ INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('坪井', '坪井
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('池田', '坪井Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('村松', '坪井Team');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('田中か', '三善Team');
+-- 菊池Team
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('越後', '菊池Team');
+INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('松坂', '菊池Team');
 -- チーム未所属（4月アポ実績反映用）
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('川上', '未所属');
 INSERT OR IGNORE INTO members (member_name, team_name) VALUES ('中村ゆ', '未所属');
@@ -269,4 +272,5 @@ CREATE TABLE IF NOT EXISTS feedback_requests (
 -- 初期データ: デフォルト設定
 INSERT OR IGNORE INTO settings (key, value) VALUES ('cancel_rate_default', '0.8');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('next_month_flow_rate', '0.5');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_target_total', '16500000');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_target_total', '9000000');

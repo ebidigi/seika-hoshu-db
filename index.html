@@ -60,12 +60,6 @@
                     </svg>
                     <span class="sidebar-item-text">経営</span>
                 </button>
-                <button class="sidebar-item" data-tab="analysis" onclick="switchTab('analysis')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M18 20V10M12 20V4M6 20v-6"/>
-                    </svg>
-                    <span class="sidebar-item-text">詳細分析</span>
-                </button>
                 <button class="sidebar-item" data-tab="appointments" onclick="switchTab('appointments')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
@@ -239,11 +233,6 @@
                     </div>
                 </div>
 
-                <!-- Tab 3: 詳細分析 -->
-                <div class="tab-content" id="tab-analysis">
-                    <div id="analysisNewContent"></div>
-                </div>
-
                 <!-- Tab 4: 経営 -->
                 <div class="tab-content active" id="tab-management">
                     <div id="mgmtSalesProgress"></div>
@@ -251,6 +240,7 @@
                     <div id="mgmtExecForecast"></div>
                     <div id="mgmtCapProgress"></div>
                     <div id="mgmtAssignmentAssess"></div>
+                    <div id="mgmtHistoricalStatus"></div>
                 </div>
 
                 <!-- Tab 6: 設定 -->
