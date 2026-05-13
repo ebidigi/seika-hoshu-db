@@ -35,6 +35,7 @@ let editingProjectId = null;
 let teamHistoryData = []; // member_team_history 全データ
 let executionAppoData = []; // 当月実施予定のアポ（前月以前取得含む）
 let historicalAppoData = []; // 2025-07以降の全アポ（案件別ステータス集計用）
+let monthlyTotalTargets = {}; // year_month → appointment_amount_target（全月分）
 let dailyPlansData = []; // 予定報告データ
 let dailyTargetsData = []; // 日別目標
 let weeklyTargetsData = []; // 週別目標
@@ -64,9 +65,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const dailyTargetDateEl = document.getElementById('dailyTargetDate');
     if (dailyTargetDateEl) dailyTargetDateEl.value = formatDate(tomorrow);
 
-    // 朝礼タブがデフォルトなのでフィルターを非表示
+    // 初期表示タブに合わせてフィルター可視性を調整
+    // （currentTab デフォルトは management）
     const filters = document.getElementById('globalFilters');
-    if (filters) filters.style.display = 'none';
+    const teamGroup = document.getElementById('filterTeam')?.closest('.filter-group');
+    const memberGroup = document.getElementById('filterMember')?.closest('.filter-group');
+    if (filters) {
+        if (currentTab === 'morning') {
+            filters.style.display = 'none';
+        } else if (currentTab === 'management') {
+            filters.style.display = 'flex';
+            if (teamGroup) teamGroup.style.display = 'none';
+            if (memberGroup) memberGroup.style.display = 'none';
+        } else {
+            filters.style.display = 'flex';
+        }
+    }
 
     // URL パラメータで外部共有モード
     const params = new URLSearchParams(window.location.search);
@@ -2035,17 +2049,37 @@ function destroyMgmtCharts() {
     Object.keys(mgmtCharts).forEach(k => { if (mgmtCharts[k]) { mgmtCharts[k].destroy(); delete mgmtCharts[k]; } });
 }
 
-// 2025-07以降の全アポを軽量取得（案件別ステータス集計用）
+// 2025-07以降の全アポを軽量取得（案件別ステータス集計 / 月別推移用）
+// 取得日 OR 実施予定日のいずれかが 2025-07 以降のものを対象
 async function loadHistoricalAppointments() {
     try {
-        const data = await queryTurso(
-            "SELECT acquisition_date, scheduled_date, member_name, project_name, status, amount FROM appointments WHERE acquisition_date >= '2025-07-01' ORDER BY acquisition_date",
-            []
-        );
-        normalizeDataMemberNames(data);
-        historicalAppoData = deduplicateAppointments(data);
+        const [appoData, allTargets] = await Promise.all([
+            queryTurso(
+                "SELECT acquisition_date, scheduled_date, member_name, project_name, customer_name, status, amount FROM appointments WHERE acquisition_date >= '2025-07-01' OR scheduled_date >= '2025-07-01' ORDER BY acquisition_date",
+                []
+            ),
+            queryTurso(
+                "SELECT year_month, appointment_amount_target FROM targets WHERE target_type='total' AND target_name='all' ORDER BY year_month",
+                []
+            ).catch(() => []),
+        ]);
+        normalizeDataMemberNames(appoData);
+        // dedup は適用しない（acquisition_date+customer_name 単独で同一視されると、
+        // 同顧客で実施予定日が複数のアポが合算されてしまうため）。
+        // 月別集計用には素のレコードを保持し、各レンダー側で精緻な key で重複排除する。
+        historicalAppoData = appoData;
+        monthlyTotalTargets = {};
+        (allTargets || []).forEach(t => { monthlyTotalTargets[t.year_month] = parseFloat(t.appointment_amount_target) || 0; });
         if (document.getElementById('mgmtHistoricalStatus')) {
             renderHistoricalProjectStatus();
+        }
+        if (document.getElementById('mgmtMonthlyTrend')) {
+            renderMonthlyTrendTable();
+        }
+        // 全案件 取得実績バナーも historicalAppoData に依存するため、経営タブを再描画
+        if (currentTab === 'management') {
+            const ym = document.getElementById('filterMonth').value;
+            renderManagement({ team: 'all', member: 'all', month: ym });
         }
     } catch (e) {
         console.error('履歴アポ読み込み失敗:', e);
@@ -2118,6 +2152,78 @@ function renderHistoricalProjectStatus() {
     parts.push('<td class="text-right">' + tCancelRate + '</td>');
     parts.push('<td class="text-right">¥' + Math.round(totals.amount).toLocaleString() + '</td>');
     parts.push('</tr></tfoot></table></div>');
+    container.innerHTML = parts.join('');
+}
+
+// 月別 全案件 取得目標 vs 実績 推移テーブルを描画
+// 集計ロジック: 「取得日 OR 実施予定日が当該月」のアポを active案件 + 除外メンバー除外で UNION → amount合計
+function renderMonthlyTrendTable() {
+    const container = document.getElementById('mgmtMonthlyTrend');
+    if (!container) return;
+    if (!historicalAppoData) {
+        container.textContent = '読み込み中...';
+        return;
+    }
+    // 月リスト: 2026-01 〜 当月
+    const today = new Date();
+    const months = [];
+    let y = 2026, m = 1;
+    while (y < today.getFullYear() || (y === today.getFullYear() && m <= today.getMonth() + 1)) {
+        months.push(y + '-' + String(m).padStart(2, '0'));
+        m++;
+        if (m > 12) { m = 1; y++; }
+    }
+    months.reverse(); // 直近を上に
+    const activeProjectNames = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
+    const settingsDefault = parseInt(settingsMap.monthly_target_total || '16500000');
+
+    const rows = months.map(ym => {
+        const excluded = getExcludedMembers(ym);
+        // UNION dedup
+        const seen = new Set();
+        let actual = 0;
+        historicalAppoData.forEach(a => {
+            if (excluded.includes(a.member_name)) return;
+            if (!activeProjectNames.has(a.project_name)) return;
+            const acqIn = a.acquisition_date && a.acquisition_date.startsWith(ym);
+            const schIn = a.scheduled_date && a.scheduled_date.startsWith(ym);
+            if (!acqIn && !schIn) return;
+            const key = a.id != null
+                ? 'id_' + a.id
+                : `${a.member_name}|${a.project_name}|${a.acquisition_date || ''}|${a.scheduled_date || ''}|${a.customer_name || ''}|${a.amount || ''}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            actual += parseFloat(a.amount) || 0;
+        });
+        const target = monthlyTotalTargets[ym] || settingsDefault;
+        const rate = target > 0 ? (actual / target * 100) : 0;
+        return { ym, target, actual, rate };
+    });
+
+    const parts = [];
+    parts.push('<div style="margin:28px 0 8px;">');
+    parts.push('<div class="section-title" style="margin:0;border:none;padding:0;">月別 達成率推移 <span style="font-size:0.75rem;color:var(--text-light);font-weight:normal;margin-left:8px;">2026-01 〜 当月 / 全案件 取得目標 vs amount合計実績（取得日 OR 実施予定日が当該月）</span></div>');
+    parts.push('</div>');
+    parts.push('<div style="overflow-x:auto;"><table class="data-table"><thead><tr>');
+    parts.push('<th>月</th>');
+    parts.push('<th class="text-right">目標</th>');
+    parts.push('<th class="text-right">実績</th>');
+    parts.push('<th class="text-right">達成率</th>');
+    parts.push('<th style="min-width:200px;">進捗バー</th>');
+    parts.push('</tr></thead><tbody>');
+    rows.forEach(r => {
+        const rateStr = r.rate.toFixed(1) + '%';
+        const barWidth = Math.min(r.rate, 100);
+        const color = r.rate >= 100 ? '#86aaec' : r.rate >= 80 ? '#ede07d' : r.rate >= 50 ? '#f0b8a0' : '#ef947a';
+        parts.push('<tr>');
+        parts.push('<td style="font-weight:600;">' + r.ym + '</td>');
+        parts.push('<td class="text-right">¥' + r.target.toLocaleString() + '</td>');
+        parts.push('<td class="text-right" style="font-weight:600;">¥' + Math.round(r.actual).toLocaleString() + '</td>');
+        parts.push('<td class="text-right" style="color:' + color + ';font-weight:600;">' + rateStr + '</td>');
+        parts.push('<td><div style="height:10px;background:#eef0f4;border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + barWidth + '%;background:' + color + ';border-radius:4px;"></div></div></td>');
+        parts.push('</tr>');
+    });
+    parts.push('</tbody></table></div>');
     container.innerHTML = parts.join('');
 }
 
@@ -2637,8 +2743,26 @@ function renderManagement(filter) {
     <!-- 案件別 詳細テーブル -->
     <div class="section-title" style="margin-top:28px;">案件別 詳細</div>
     ${(() => {
+        // 全案件 取得実績: 当月「取得日 OR 実施予定日」のいずれかが当月のアポを集計
+        // ※ 月別推移テーブルと同一の historicalAppoData 基準で計算（数値の整合を保証）
+        const activeProjectNames = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
+        const seenIds = new Set();
+        let totalAcqActual = 0;
+        (historicalAppoData || []).forEach(a => {
+            if (excluded.includes(a.member_name)) return;
+            if (!activeProjectNames.has(a.project_name)) return;
+            const acqIn = a.acquisition_date && a.acquisition_date.startsWith(ym);
+            const schIn = a.scheduled_date && a.scheduled_date.startsWith(ym);
+            if (!acqIn && !schIn) return;
+            const key = a.id != null
+                ? 'id_' + a.id
+                : `${a.member_name}|${a.project_name}|${a.acquisition_date || ''}|${a.scheduled_date || ''}|${a.customer_name || ''}|${a.amount || ''}`;
+            if (seenIds.has(key)) return;
+            seenIds.add(key);
+            totalAcqActual += parseFloat(a.amount) || 0;
+        });
+
         const totalAcqTarget = monthlyTarget;
-        const totalAcqActual = capData.reduce((s, c) => s + c.acqAmount, 0);
         const achieveRate = totalAcqTarget > 0 ? (totalAcqActual / totalAcqTarget * 100).toFixed(1) : '0';
         const barWidth = Math.min(parseFloat(achieveRate), 100);
         const barColor = parseFloat(achieveRate) >= standardProgress ? '#86aaec' : parseFloat(achieveRate) >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
@@ -2654,7 +2778,7 @@ function renderManagement(filter) {
             <div style="flex:1;min-width:200px;">
                 <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-light);margin-bottom:4px;">
                     <span>達成率 ${achieveRate}%</span>
-                    <span style="font-size:0.7rem;">※キャンセル無関係（取得ベース）</span>
+                    <span style="font-size:0.7rem;">※当月着地（取得 OR 実施予定が当月 / 全status / amount合計）</span>
                 </div>
                 <div style="height:8px;background:#eef0f4;border-radius:4px;overflow:hidden;">
                     <div style="height:100%;width:${barWidth}%;background:${barColor};border-radius:4px;"></div>
@@ -2674,7 +2798,8 @@ function renderManagement(filter) {
     document.getElementById('mgmtCapProgress').innerHTML = '';
     document.getElementById('mgmtAssignmentAssess').innerHTML = '';
 
-    // 2025-07以降の案件別ステータス集計（履歴データが既に読み込み済みなら描画）
+    // 月別 達成率推移 + 案件別ステータス集計（履歴データが既に読み込み済みなら描画）
+    renderMonthlyTrendTable();
     renderHistoricalProjectStatus();
 
     // ========== チャート描画 ==========
@@ -5545,10 +5670,23 @@ function switchTab(tab) {
         content.classList.toggle('active', content.id === `tab-${tab}`);
     });
 
-    // 朝礼・経営タブではフィルターを非表示
+    // タブごとのフィルター表示制御
+    // 朝礼: 全フィルター非表示 / 経営: 月のみ表示 / その他: 全表示
     const filters = document.getElementById('globalFilters');
+    const teamGroup = document.getElementById('filterTeam')?.closest('.filter-group');
+    const memberGroup = document.getElementById('filterMember')?.closest('.filter-group');
     if (filters) {
-        filters.style.display = (tab === 'morning' || tab === 'management') ? 'none' : 'flex';
+        if (tab === 'morning') {
+            filters.style.display = 'none';
+        } else if (tab === 'management') {
+            filters.style.display = 'flex';
+            if (teamGroup) teamGroup.style.display = 'none';
+            if (memberGroup) memberGroup.style.display = 'none';
+        } else {
+            filters.style.display = 'flex';
+            if (teamGroup) teamGroup.style.display = '';
+            if (memberGroup) memberGroup.style.display = '';
+        }
     }
 
     // タブ切替時にチーム・メンバーフィルターをリセット（タブ間の影響を防止）
