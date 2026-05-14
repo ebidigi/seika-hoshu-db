@@ -4937,6 +4937,9 @@ function renderSettings() {
 
     recalcTargetTotals();
 
+    // 月別 総目標金額(全社合計) テーブルを描画
+    renderMonthlyTotalTargets();
+
     // レート設定（DOM要素がある場合のみ）
     const crEl = document.getElementById('settingCancelRate');
     const frEl = document.getElementById('settingFlowRate');
@@ -5370,10 +5373,8 @@ async function saveTargets() {
     const msg = document.getElementById('targetMessage');
 
     try {
-        // 全体目標
-        const totalVal = parseInt(document.getElementById('target_total_all').value) || 0;
-        const totalExec = parseInt(document.getElementById('target_total_all_exec').value) || 0;
-        await upsertTarget('total', 'all', ym, totalVal, totalExec);
+        // 全体目標(total/all) は「月別 総目標金額」セクションで独立管理するため、
+        // チーム/メンバー合計による上書きは行わない。
 
         // チーム目標
         for (const team of getActiveTeamNames(ym)) {
@@ -5418,6 +5419,112 @@ async function upsertTarget(type, name, ym, amount, execAmount) {
                        execution_target = excluded.execution_target`,
         [type, name, ym, amount, execAmount || 0]
     );
+}
+
+// 月別 総目標金額(全社合計) — targets(total, all, YYYY-MM) を月単位で編集
+function renderMonthlyTotalTargets() {
+    const tbody = document.getElementById('monthlyTargetBody');
+    if (!tbody) return;
+
+    // 月リスト: 2026-01 〜 当月+1
+    const today = new Date();
+    const months = [];
+    let y = 2026, m = 1;
+    const endYear = today.getMonth() === 11 ? today.getFullYear() + 1 : today.getFullYear();
+    const endMonth = today.getMonth() === 11 ? 1 : today.getMonth() + 2;
+    while (y < endYear || (y === endYear && m <= endMonth)) {
+        months.push(y + '-' + String(m).padStart(2, '0'));
+        m++;
+        if (m > 12) { m = 1; y++; }
+    }
+    months.reverse(); // 直近を上に
+
+    tbody.textContent = '';
+    months.forEach(ym => {
+        const t = getTarget('total', 'all', ym);
+        const acqVal = t ? (parseInt(t.appointment_amount_target) || 0) : 0;
+        const execVal = t ? (parseInt(t.execution_target) || 0) : 0;
+
+        const tr = document.createElement('tr');
+
+        const tdYm = document.createElement('td');
+        tdYm.textContent = ym;
+        tdYm.style.fontWeight = '500';
+        tr.appendChild(tdYm);
+
+        const tdAcq = document.createElement('td');
+        const acqInput = document.createElement('input');
+        acqInput.type = 'number';
+        acqInput.min = '0';
+        acqInput.step = '100000';
+        acqInput.id = `mtt_acq_${ym}`;
+        acqInput.value = acqVal;
+        acqInput.style.width = '160px';
+        acqInput.style.padding = '6px 10px';
+        tdAcq.appendChild(acqInput);
+        tr.appendChild(tdAcq);
+
+        const tdExec = document.createElement('td');
+        const execInput = document.createElement('input');
+        execInput.type = 'number';
+        execInput.min = '0';
+        execInput.step = '100000';
+        execInput.id = `mtt_exec_${ym}`;
+        execInput.value = execVal;
+        execInput.style.width = '160px';
+        execInput.style.padding = '6px 10px';
+        tdExec.appendChild(execInput);
+        tr.appendChild(tdExec);
+
+        const tdBtn = document.createElement('td');
+        const btn = document.createElement('button');
+        btn.className = 'status-btn';
+        btn.textContent = '保存';
+        btn.onclick = () => saveMonthlyTotalTarget(ym, btn);
+        tdBtn.appendChild(btn);
+        tr.appendChild(tdBtn);
+
+        tbody.appendChild(tr);
+    });
+}
+
+async function saveMonthlyTotalTarget(ym, btn) {
+    const msg = document.getElementById('monthlyTargetMessage');
+    const acqEl = document.getElementById(`mtt_acq_${ym}`);
+    const execEl = document.getElementById(`mtt_exec_${ym}`);
+    if (!acqEl || !execEl) return;
+
+    const acqVal = parseInt(acqEl.value) || 0;
+    const execVal = parseInt(execEl.value) || 0;
+
+    try {
+        await upsertTarget('total', 'all', ym, acqVal, execVal);
+        // 目標再読み込み(現在表示中の月分)
+        const curYm = document.getElementById('filterMonth').value;
+        targetsData = await queryTurso("SELECT * FROM targets WHERE year_month = ?", [curYm]);
+        // 月別推移用の全月キャッシュも更新
+        if (typeof monthlyTotalTargets === 'object' && monthlyTotalTargets) {
+            monthlyTotalTargets[ym] = acqVal;
+        }
+
+        if (msg) {
+            msg.className = 'settings-message success';
+            msg.textContent = `${ym} の総目標金額を保存しました。`;
+            msg.style.display = 'block';
+            setTimeout(() => { msg.style.display = 'none'; }, 3000);
+        }
+        showToast(`${ym} 総目標を保存しました`);
+        setSaveBtnState(btn, true);
+
+        renderAll();
+    } catch (error) {
+        if (msg) {
+            msg.className = 'settings-message error';
+            msg.textContent = '保存に失敗しました: ' + error.message;
+            msg.style.display = 'block';
+        }
+        showToast('保存に失敗しました: ' + error.message, true);
+    }
 }
 
 async function saveDailyTarget() {
