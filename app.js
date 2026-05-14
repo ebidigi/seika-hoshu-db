@@ -2718,7 +2718,11 @@ function renderManagement(filter) {
         seenIdsForCard.add(key);
         totalAcqActualCard += parseFloat(a.amount) || 0;
     });
-    const totalAcqTargetCard = monthlyTarget;
+    // 当月着地 専用目標 (取得目標とは別管理)
+    const landingTarget = totalTarget && totalTarget.landing_amount_target
+        ? parseInt(totalTarget.landing_amount_target) || 0
+        : monthlyTarget;
+    const totalAcqTargetCard = landingTarget;
     const achieveRateCard = totalAcqTargetCard > 0 ? (totalAcqActualCard / totalAcqTargetCard * 100).toFixed(1) : '0';
     const barWidthCard = Math.min(parseFloat(achieveRateCard), 100);
     const barColorCard = parseFloat(achieveRateCard) >= standardProgress ? '#86aaec' : parseFloat(achieveRateCard) >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
@@ -5443,14 +5447,15 @@ async function saveTargets() {
     }
 }
 
-async function upsertTarget(type, name, ym, amount, execAmount) {
+async function upsertTarget(type, name, ym, amount, execAmount, landingAmount) {
     await executeTurso(
-        `INSERT INTO targets (id, target_type, target_name, year_month, appointment_amount_target, execution_target)
-         VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
+        `INSERT INTO targets (id, target_type, target_name, year_month, appointment_amount_target, execution_target, landing_amount_target)
+         VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)
          ON CONFLICT(target_type, target_name, year_month)
          DO UPDATE SET appointment_amount_target = excluded.appointment_amount_target,
-                       execution_target = excluded.execution_target`,
-        [type, name, ym, amount, execAmount || 0]
+                       execution_target = excluded.execution_target,
+                       landing_amount_target = excluded.landing_amount_target`,
+        [type, name, ym, amount, execAmount || 0, landingAmount || 0]
     );
 }
 
@@ -5477,6 +5482,7 @@ function renderMonthlyTotalTargets() {
         const t = getTarget('total', 'all', ym);
         const acqVal = t ? (parseInt(t.appointment_amount_target) || 0) : 0;
         const execVal = t ? (parseInt(t.execution_target) || 0) : 0;
+        const landingVal = t ? (parseInt(t.landing_amount_target) || 0) : 0;
 
         const tr = document.createElement('tr');
 
@@ -5509,6 +5515,18 @@ function renderMonthlyTotalTargets() {
         tdExec.appendChild(execInput);
         tr.appendChild(tdExec);
 
+        const tdLanding = document.createElement('td');
+        const landingInput = document.createElement('input');
+        landingInput.type = 'number';
+        landingInput.min = '0';
+        landingInput.step = '100000';
+        landingInput.id = `mtt_landing_${ym}`;
+        landingInput.value = landingVal;
+        landingInput.style.width = '160px';
+        landingInput.style.padding = '6px 10px';
+        tdLanding.appendChild(landingInput);
+        tr.appendChild(tdLanding);
+
         const tdBtn = document.createElement('td');
         const btn = document.createElement('button');
         btn.className = 'status-btn';
@@ -5525,13 +5543,15 @@ async function saveMonthlyTotalTarget(ym, btn) {
     const msg = document.getElementById('monthlyTargetMessage');
     const acqEl = document.getElementById(`mtt_acq_${ym}`);
     const execEl = document.getElementById(`mtt_exec_${ym}`);
+    const landingEl = document.getElementById(`mtt_landing_${ym}`);
     if (!acqEl || !execEl) return;
 
     const acqVal = parseInt(acqEl.value) || 0;
     const execVal = parseInt(execEl.value) || 0;
+    const landingVal = landingEl ? (parseInt(landingEl.value) || 0) : 0;
 
     try {
-        await upsertTarget('total', 'all', ym, acqVal, execVal);
+        await upsertTarget('total', 'all', ym, acqVal, execVal, landingVal);
         // 目標再読み込み(現在表示中の月分)
         const curYm = document.getElementById('filterMonth').value;
         targetsData = await queryTurso("SELECT * FROM targets WHERE year_month = ?", [curYm]);

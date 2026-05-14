@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS targets (
   pr_count_target INTEGER DEFAULT 0,
   appointment_count_target INTEGER DEFAULT 0,
   appointment_amount_target INTEGER DEFAULT 0,
+  landing_amount_target INTEGER DEFAULT 0,
   UNIQUE(target_type, target_name, year_month)
 );
 
