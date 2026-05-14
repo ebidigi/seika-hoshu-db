@@ -2299,12 +2299,48 @@ th.sortable:hover { background: var(--gray-200); }
 /* ========== 経営タブ: チャートベースUI ========== */
 .mgmt-top-cards {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: repeat(4, 1fr);
     gap: 16px;
     margin-bottom: 24px;
 }
-@media (max-width: 900px) {
+@media (max-width: 1200px) {
+    .mgmt-top-cards { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 700px) {
     .mgmt-top-cards { grid-template-columns: 1fr; }
+}
+.mgmt-acq-summary-card {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+}
+.mgmt-acq-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    color: var(--text-light);
+    margin-top: 6px;
+}
+.mgmt-acq-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-dark);
+}
+.mgmt-acq-bar {
+    height: 8px;
+    background: #eef0f4;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 8px;
+}
+.mgmt-acq-bar-fill {
+    height: 100%;
+    border-radius: 4px;
 }
 .mgmt-gauge-card {
     background: white;

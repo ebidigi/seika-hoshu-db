@@ -284,6 +284,11 @@ const MEMBER_NAME_NORMALIZE = {
     'k.miyoshi@digi-man.com': '三善',
     'a.echigo@digi-man.com': '越後',
     'y.matsuzaka@digi-man.com': '松坂',
+    'k.harada@digi-man.com': '原田',
+    'h.miura@digi-man.com': '三浦',
+    'k.urakami@digi-man.com': '浦上',
+    '三浦宏成': '三浦',
+    '三浦 宏成': '三浦',
 };
 
 function normalizeMemberName(name) {
@@ -2549,7 +2554,6 @@ function renderManagement(filter) {
         <th class="text-right">1時間あたり架電数</th>
     </tr></thead><tbody>`;
     let ttAcq = 0, ttExec = 0, ttAmt = 0, ttCancel = 0, ttCalls = 0, ttPr = 0, ttAppoP = 0, ttHours = 0;
-    const BREAKDOWN_MEMBERS = ['松居','山本','坪井','中村た','野上','堀切','越後','松坂','清水','JB','轟','浦上'];
     capData.forEach((c, projIdx) => {
         ttAcq += c.acquiredCount;
         ttExec += c.execCount;
@@ -2560,7 +2564,7 @@ function renderManagement(filter) {
         ttAppoP += c.appoCountPerf;
         ttHours += c.callHours;
         projTableHtml += `<tr class="proj-row" data-proj-idx="${projIdx}">
-            <td style="font-weight:600;"><button class="proj-toggle" onclick="toggleProjMemberBreakdown(${projIdx})" data-proj-idx="${projIdx}" style="margin-right:6px;border:none;background:none;cursor:pointer;font-size:0.7rem;color:#666;width:14px;padding:0;">▶</button>${escapeHtml(c.name)}</td>
+            <td style="font-weight:600;">${escapeHtml(c.name)}</td>
             <td class="text-right">¥${c.unitPrice.toLocaleString()}</td>
             <td class="text-right">${c.acquiredCount}件</td>
             <td class="text-right">${c.execCount}件</td>
@@ -2576,60 +2580,6 @@ function renderManagement(filter) {
             <td class="text-right">${c.prToAppo === '-' ? '-' : c.prToAppo + '%'}</td>
             <td class="text-right">${c.callsPerHour}</td>
         </tr>`;
-
-        // メンバー別内訳サブ行（デフォルト非表示）
-        // 指定12名を常に表示。それ以外で当該案件にデータがあるメンバーは「その他」として末尾に追加
-        const projAppoAll = allAppo.filter(d => d.project_name === c.name);
-        const projExecAll = allExecAppo.filter(d => d.project_name === c.name);
-        const projPerfAll = allPerf.filter(d => d.project_name === c.name);
-        const otherMembers = new Set();
-        projAppoAll.forEach(d => { if (d.member_name && !BREAKDOWN_MEMBERS.includes(d.member_name)) otherMembers.add(d.member_name); });
-        projExecAll.forEach(d => { if (d.member_name && !BREAKDOWN_MEMBERS.includes(d.member_name)) otherMembers.add(d.member_name); });
-        projPerfAll.forEach(d => { if (d.member_name && !BREAKDOWN_MEMBERS.includes(d.member_name)) otherMembers.add(d.member_name); });
-        const renderList = [
-            ...BREAKDOWN_MEMBERS.map(n => ({ name: n, isOther: false })),
-            ...[...otherMembers].sort().map(n => ({ name: n, isOther: true })),
-        ];
-        renderList.forEach(({ name: memberName, isOther }) => {
-            const mAppo = projAppoAll.filter(d => d.member_name === memberName);
-            const mExec = projExecAll.filter(d => d.member_name === memberName);
-            const mPerf = projPerfAll.filter(d => d.member_name === memberName);
-            const mAcqCount = mAppo.length;
-            const mExecCount = mExec.length;
-            const mCalls = sum(mPerf, 'call_count');
-            const mAcqAmt = c.unitPrice * mAcqCount;
-            const mCancel = mExec.filter(a => a.status === 'キャンセル').length;
-            const mCancelRate = mExecCount > 0 ? Math.round(mCancel / mExecCount * 100) : 0;
-            const mPr = sum(mPerf, 'pr_count');
-            const mAppoP = sum(mPerf, 'appointment_count');
-            const mHours = sum(mPerf, 'call_hours');
-            const mCallToAppo = mCalls > 0 ? (mAppoP / mCalls * 100).toFixed(1) + '%' : '-';
-            const mPrRate = mCalls > 0 ? (mPr / mCalls * 100).toFixed(1) + '%' : '-';
-            const mPrToAppo = mPr > 0 ? (mAppoP / mPr * 100).toFixed(1) + '%' : '-';
-            const mCallsPerHour = mHours > 0 ? (mCalls / mHours).toFixed(1) : '-';
-            const isEmpty = mAcqCount === 0 && mExecCount === 0 && mCalls === 0;
-            // 「その他」枠は当該案件にデータがある実在メンバーのみ表示（ノイズ低減）
-            if (isOther && isEmpty) return;
-            const rowColor = isEmpty ? '#bbb' : (isOther ? '#666' : '#555');
-            const labelPrefix = isOther ? '└ ' : '└ ';
-            projTableHtml += `<tr class="proj-member-row" data-proj-idx="${projIdx}" style="display:none;background:#fbfcfe;font-size:0.78rem;color:${rowColor};">
-                <td style="padding-left:34px;color:${rowColor};">${labelPrefix}${escapeHtml(memberName)}${isOther ? ' <span style="font-size:0.65rem;color:#aaa;">(その他)</span>' : ''}</td>
-                <td class="text-right">-</td>
-                <td class="text-right">${mAcqCount}件</td>
-                <td class="text-right">${mExecCount}件</td>
-                <td class="text-right">¥${mAcqAmt.toLocaleString()}</td>
-                <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${mCancel}件</td>
-                <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${mCancel > 0 ? mCancelRate + '%' : '-'}</td>
-                <td class="text-right">${mCalls.toLocaleString()}</td>
-                <td class="text-right">${mPr.toLocaleString()}</td>
-                <td class="text-right">${mAppoP.toLocaleString()}</td>
-                <td class="text-right">${mHours.toFixed(1)}h</td>
-                <td class="text-right">${mCallToAppo}</td>
-                <td class="text-right">${mPrRate}</td>
-                <td class="text-right">${mPrToAppo}</td>
-                <td class="text-right">${mCallsPerHour}</td>
-            </tr>`;
-        });
     });
     const ttCallToAppo = ttCalls > 0 ? (ttAppoP / ttCalls * 100).toFixed(1) + '%' : '-';
     const ttPrRate = ttCalls > 0 ? (ttPr / ttCalls * 100).toFixed(1) + '%' : '-';
@@ -2654,11 +2604,124 @@ function renderManagement(filter) {
         <td class="text-right">${ttCallsPerHour}</td>
     </tr></tfoot></table></div>`;
 
+    // ========== 人別 詳細データ準備（案件別と同じ列構成、アポ単価のみ除外） ==========
+    // 表示メンバー: 固定12名（成果報酬チーム）
+    const PERSON_DETAIL_MEMBERS = ['松居','山本','坪井','中村た','野上','堀切','越後','松坂','清水','JB','轟','浦上'];
+    const activeProjectNamesPerMember = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
+
+    const memberDetailData = PERSON_DETAIL_MEMBERS.map(memberName => {
+        const mAppo = allAppo.filter(d => d.member_name === memberName && activeProjectNamesPerMember.has(d.project_name));
+        const mExec = allExecAppo.filter(d => d.member_name === memberName && activeProjectNamesPerMember.has(d.project_name));
+        const mPerf = allPerf.filter(d => d.member_name === memberName && activeProjectNamesPerMember.has(d.project_name));
+        const acquiredCount = mAppo.length;
+        const execCount = mExec.length;
+        const acqAmount = mAppo.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+        const cancelCount = mExec.filter(a => a.status === 'キャンセル').length;
+        const cancelRate = execCount > 0 ? Math.round(cancelCount / execCount * 100) : 0;
+        const callCount = sum(mPerf, 'call_count');
+        const prCount = sum(mPerf, 'pr_count');
+        const appoCountPerf = sum(mPerf, 'appointment_count');
+        const callHours = sum(mPerf, 'call_hours');
+        const callToAppo = callCount > 0 ? (appoCountPerf / callCount * 100).toFixed(1) : '-';
+        const prRate = callCount > 0 ? (prCount / callCount * 100).toFixed(1) : '-';
+        const prToAppo = prCount > 0 ? (appoCountPerf / prCount * 100).toFixed(1) : '-';
+        const callsPerHour = callHours > 0 ? (callCount / callHours).toFixed(1) : '-';
+        return { name: memberName, acquiredCount, execCount, acqAmount, cancelCount, cancelRate, callCount, prCount, appoCountPerf, callHours, callToAppo, prRate, prToAppo, callsPerHour };
+    }).sort((a, b) => b.acqAmount - a.acqAmount);
+
+    let memberTableHtml = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+        <th style="min-width:90px;white-space:nowrap;">人</th>
+        <th class="text-right">当月取得件数</th>
+        <th class="text-right">当月実施アポ件数合計</th>
+        <th class="text-right">取得金額</th>
+        <th class="text-right" style="background:#fdf2f0;color:#c0392b;">却下,キャンセル数</th>
+        <th class="text-right" style="background:#fdf2f0;color:#c0392b;">却下,キャンセル率</th>
+        <th class="text-right">架電数</th>
+        <th class="text-right">着電数</th>
+        <th class="text-right">アポ数</th>
+        <th class="text-right">稼働時間</th>
+        <th class="text-right">架電Toアポ率</th>
+        <th class="text-right">着電率</th>
+        <th class="text-right">着電Toアポ率</th>
+        <th class="text-right">1時間あたり架電数</th>
+    </tr></thead><tbody>`;
+    let mtAcq = 0, mtExec = 0, mtAmt = 0, mtCancel = 0, mtCalls = 0, mtPr = 0, mtAppoP = 0, mtHours = 0;
+    memberDetailData.forEach(m => {
+        mtAcq += m.acquiredCount;
+        mtExec += m.execCount;
+        mtAmt += m.acqAmount;
+        mtCancel += m.cancelCount;
+        mtCalls += m.callCount;
+        mtPr += m.prCount;
+        mtAppoP += m.appoCountPerf;
+        mtHours += m.callHours;
+        memberTableHtml += `<tr>
+            <td style="font-weight:600;min-width:90px;white-space:nowrap;">${escapeHtml(m.name)}</td>
+            <td class="text-right">${m.acquiredCount}件</td>
+            <td class="text-right">${m.execCount}件</td>
+            <td class="text-right">¥${m.acqAmount.toLocaleString()}</td>
+            <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${m.cancelCount}件</td>
+            <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${m.cancelCount > 0 ? m.cancelRate + '%' : '-'}</td>
+            <td class="text-right">${m.callCount.toLocaleString()}</td>
+            <td class="text-right">${m.prCount.toLocaleString()}</td>
+            <td class="text-right">${m.appoCountPerf.toLocaleString()}</td>
+            <td class="text-right">${m.callHours.toFixed(1)}h</td>
+            <td class="text-right">${m.callToAppo === '-' ? '-' : m.callToAppo + '%'}</td>
+            <td class="text-right">${m.prRate === '-' ? '-' : m.prRate + '%'}</td>
+            <td class="text-right">${m.prToAppo === '-' ? '-' : m.prToAppo + '%'}</td>
+            <td class="text-right">${m.callsPerHour}</td>
+        </tr>`;
+    });
+    const mtCallToAppo = mtCalls > 0 ? (mtAppoP / mtCalls * 100).toFixed(1) + '%' : '-';
+    const mtPrRate = mtCalls > 0 ? (mtPr / mtCalls * 100).toFixed(1) + '%' : '-';
+    const mtPrToAppo = mtPr > 0 ? (mtAppoP / mtPr * 100).toFixed(1) + '%' : '-';
+    const mtCallsPerHour = mtHours > 0 ? (mtCalls / mtHours).toFixed(1) : '-';
+    const mtCancelRate = mtExec > 0 ? Math.round(mtCancel / mtExec * 100) + '%' : '-';
+    memberTableHtml += `</tbody><tfoot><tr style="font-weight:600;">
+        <td style="min-width:90px;white-space:nowrap;">合計</td>
+        <td class="text-right">${mtAcq}件</td>
+        <td class="text-right">${mtExec}件</td>
+        <td class="text-right">¥${mtAmt.toLocaleString()}</td>
+        <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${mtCancel}件</td>
+        <td class="text-right" style="background:#fdf8f7;color:#c0392b;">${mtCancelRate}</td>
+        <td class="text-right">${mtCalls.toLocaleString()}</td>
+        <td class="text-right">${mtPr.toLocaleString()}</td>
+        <td class="text-right">${mtAppoP.toLocaleString()}</td>
+        <td class="text-right">${mtHours.toFixed(1)}h</td>
+        <td class="text-right">${mtCallToAppo}</td>
+        <td class="text-right">${mtPrRate}</td>
+        <td class="text-right">${mtPrToAppo}</td>
+        <td class="text-right">${mtCallsPerHour}</td>
+    </tr></tfoot></table></div>`;
+
     // 取消率チャート高さ
     const cancelChartHeight = Math.max(200, capData.filter(c => c.cancelCount > 0).length * 36 + 40);
 
     // 期間ラベル
     const periodLabels = { day: '日別', week: '週別', month: '月別', quarter: 'Q別', custom: 'カスタム' };
+
+    // ========== 案件別 取得実績の事前算出（カード用） ==========
+    // 「当月着地」基準: appointments で acquisition_date OR scheduled_date が当月のアポを集計
+    const activeProjectNamesForCard = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
+    const seenIdsForCard = new Set();
+    let totalAcqActualCard = 0;
+    (historicalAppoData || []).forEach(a => {
+        if (excluded.includes(a.member_name)) return;
+        if (!activeProjectNamesForCard.has(a.project_name)) return;
+        const acqIn = a.acquisition_date && a.acquisition_date.startsWith(ym);
+        const schIn = a.scheduled_date && a.scheduled_date.startsWith(ym);
+        if (!acqIn && !schIn) return;
+        const key = a.id != null
+            ? 'id_' + a.id
+            : `${a.member_name}|${a.project_name}|${a.acquisition_date || ''}|${a.scheduled_date || ''}|${a.customer_name || ''}|${a.amount || ''}`;
+        if (seenIdsForCard.has(key)) return;
+        seenIdsForCard.add(key);
+        totalAcqActualCard += parseFloat(a.amount) || 0;
+    });
+    const totalAcqTargetCard = monthlyTarget;
+    const achieveRateCard = totalAcqTargetCard > 0 ? (totalAcqActualCard / totalAcqTargetCard * 100).toFixed(1) : '0';
+    const barWidthCard = Math.min(parseFloat(achieveRateCard), 100);
+    const barColorCard = parseFloat(achieveRateCard) >= standardProgress ? '#86aaec' : parseFloat(achieveRateCard) >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
 
     // ========== HTML構築 ==========
     let html = `
@@ -2671,10 +2734,10 @@ function renderManagement(filter) {
         <span class="mgmt-period-label">${periodLabels[mgmtPeriod]}表示</span>
     </div>
 
-    <!-- トップ3カード: ゲージ×2 + ヨミ -->
+    <!-- トップ4カード: ゲージ×2 + 全案件取得 + ヨミ -->
     <div class="mgmt-top-cards">
         <div class="mgmt-gauge-card">
-            <div class="mgmt-gauge-title">取得金額</div>
+            <div class="mgmt-gauge-title">当月取得<span style="font-size:0.7rem;color:var(--text-light);margin-left:6px;">取得日基準</span></div>
             <div class="mgmt-gauge-wrap"><canvas id="mgmtGaugeAcq"></canvas></div>
             <div class="mgmt-gauge-footer">目標 ¥${periodTarget.toLocaleString()}</div>
         </div>
@@ -2687,6 +2750,16 @@ function renderManagement(filter) {
                     <div class="mgmt-progress-fill" style="width:${Math.min(execRate, 100)}%;background:${execRate < 50 ? 'var(--red-400)' : execRate < 80 ? 'var(--yellow-300)' : 'var(--blue-200)'}"></div>
                 </div>
                 <div class="mgmt-progress-label">実行達成率 ${execRate}%</div>
+            </div>
+        </div>
+        <div class="mgmt-acq-summary-card">
+            <div class="mgmt-gauge-title">当月着地<span style="font-size:0.7rem;color:var(--text-light);margin-left:6px;">取得 OR 実施予定基準</span></div>
+            <div style="margin-top:14px;">
+                <div class="mgmt-acq-row"><span>取得目標</span><span class="mgmt-acq-value">¥${totalAcqTargetCard.toLocaleString()}</span></div>
+                <div class="mgmt-acq-row"><span>着地予定</span><span class="mgmt-acq-value" style="color:${barColorCard};">¥${totalAcqActualCard.toLocaleString()}</span></div>
+                <div class="mgmt-acq-bar"><div class="mgmt-acq-bar-fill" style="width:${barWidthCard}%;background:${barColorCard};"></div></div>
+                <div style="font-size:0.72rem;color:var(--text-light);margin-top:6px;">達成率 ${achieveRateCard}%</div>
+                <div style="font-size:0.66rem;color:var(--text-light);margin-top:4px;line-height:1.3;">※取得日 OR 実施予定日 が当月 / 全status / amount合計</div>
             </div>
         </div>
         <div class="mgmt-gauge-card mgmt-yomi-card">
@@ -2742,51 +2815,11 @@ function renderManagement(filter) {
 
     <!-- 案件別 詳細テーブル -->
     <div class="section-title" style="margin-top:28px;">案件別 詳細</div>
-    ${(() => {
-        // 全案件 取得実績: 当月「取得日 OR 実施予定日」のいずれかが当月のアポを集計
-        // ※ 月別推移テーブルと同一の historicalAppoData 基準で計算（数値の整合を保証）
-        const activeProjectNames = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
-        const seenIds = new Set();
-        let totalAcqActual = 0;
-        (historicalAppoData || []).forEach(a => {
-            if (excluded.includes(a.member_name)) return;
-            if (!activeProjectNames.has(a.project_name)) return;
-            const acqIn = a.acquisition_date && a.acquisition_date.startsWith(ym);
-            const schIn = a.scheduled_date && a.scheduled_date.startsWith(ym);
-            if (!acqIn && !schIn) return;
-            const key = a.id != null
-                ? 'id_' + a.id
-                : `${a.member_name}|${a.project_name}|${a.acquisition_date || ''}|${a.scheduled_date || ''}|${a.customer_name || ''}|${a.amount || ''}`;
-            if (seenIds.has(key)) return;
-            seenIds.add(key);
-            totalAcqActual += parseFloat(a.amount) || 0;
-        });
+    ${projTableHtml}
 
-        const totalAcqTarget = monthlyTarget;
-        const achieveRate = totalAcqTarget > 0 ? (totalAcqActual / totalAcqTarget * 100).toFixed(1) : '0';
-        const barWidth = Math.min(parseFloat(achieveRate), 100);
-        const barColor = parseFloat(achieveRate) >= standardProgress ? '#86aaec' : parseFloat(achieveRate) >= standardProgress * 0.8 ? '#ede07d' : '#ef947a';
-        return `<div class="acq-summary-banner" style="display:flex;align-items:center;gap:24px;background:#f8faff;border:1px solid #e3e8f0;border-radius:8px;padding:14px 18px;margin-bottom:12px;flex-wrap:wrap;">
-            <div>
-                <div style="font-size:0.75rem;color:var(--text-light);">全案件 取得目標</div>
-                <div style="font-size:1.25rem;font-weight:700;">¥${totalAcqTarget.toLocaleString()}</div>
-            </div>
-            <div>
-                <div style="font-size:0.75rem;color:var(--text-light);">全案件 取得実績</div>
-                <div style="font-size:1.25rem;font-weight:700;color:${barColor};">¥${totalAcqActual.toLocaleString()}</div>
-            </div>
-            <div style="flex:1;min-width:200px;">
-                <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-light);margin-bottom:4px;">
-                    <span>達成率 ${achieveRate}%</span>
-                    <span style="font-size:0.7rem;">※当月着地（取得 OR 実施予定が当月 / 全status / amount合計）</span>
-                </div>
-                <div style="height:8px;background:#eef0f4;border-radius:4px;overflow:hidden;">
-                    <div style="height:100%;width:${barWidth}%;background:${barColor};border-radius:4px;"></div>
-                </div>
-            </div>
-        </div>`;
-    })()}
-    ${projTableHtml}`;
+    <!-- 人別 詳細テーブル -->
+    <div class="section-title" style="margin-top:28px;">人別 詳細</div>
+    ${memberTableHtml}`;
 
     document.getElementById('mgmtSalesProgress').innerHTML = html;
 
