@@ -8,6 +8,7 @@ let appointmentsData = [];
 let membersData = [];
 let teamsData = [];
 let projectsData = [];
+let projectPlansData = []; // project_plans 全件 (project_id でグルーピングして利用)
 let targetsData = [];
 let settingsMap = {};
 // 2026年 日本の祝日（DB未登録時のフォールバック）
@@ -94,8 +95,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==================== カスタムセレクト ====================
 function initCustomSelects() {
     document.querySelectorAll('select:not(.custom-initialized)').forEach(sel => {
-        // モーダル内のselectは除外（フォーム操作が複雑になるため）
-        if (sel.closest('.modal-content')) return;
+        // モーダル内の select は基本除外 (data-custom-select="1" が明示的にあるものだけ許可)
+        if (sel.closest('.modal-content') && sel.dataset.customSelect !== '1') return;
         // すでにカスタム化済みなら除外
         if (sel.classList.contains('custom-initialized')) return;
 
@@ -167,6 +168,58 @@ function initCustomSelects() {
 document.addEventListener('click', () => {
     document.querySelectorAll('.custom-select-wrap.open').forEach(w => w.classList.remove('open'));
 });
+
+// 既存のカスタムセレクトを破棄して作り直す
+// (native <select> の options を JS で再構築した後に呼ぶ)
+function rebuildCustomSelect(selectId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    let nxt = sel.nextSibling;
+    while (nxt && !(nxt.classList && nxt.classList.contains('custom-select-wrap'))) {
+        nxt = nxt.nextSibling;
+    }
+    if (nxt) nxt.remove();
+    sel.classList.remove('custom-initialized');
+    sel.style.display = '';
+    initCustomSelects();
+}
+
+// ==================== 数値フォーマット (3桁カンマ) ====================
+// UI 表示は年・月・日を除いて 3 桁カンマで統一。
+// fmtNum() で表示、parseNum() で読み出し時にカンマ除去。
+function fmtNum(n) {
+    const v = typeof n === 'string' ? parseFloat(n.replace(/,/g, '')) : Number(n);
+    if (!isFinite(v)) return '';
+    return v.toLocaleString('ja-JP');
+}
+function parseNum(s) {
+    if (s == null || s === '') return 0;
+    const n = parseFloat(String(s).replace(/,/g, ''));
+    return isFinite(n) ? n : 0;
+}
+// type="number" だとカンマを受け付けないため、type="text" + inputmode + 自動カンマ整形
+function attachThousandSeparator(input, opts) {
+    const initial = input.value;
+    input.type = 'text';
+    input.inputMode = 'numeric';
+    input.autocomplete = 'off';
+    const format = () => {
+        const cleaned = String(input.value).replace(/[^\d-]/g, '');
+        if (cleaned === '' || cleaned === '-') { input.value = ''; return; }
+        input.value = parseInt(cleaned, 10).toLocaleString('ja-JP');
+    };
+    input.addEventListener('input', () => {
+        const cleaned = String(input.value).replace(/[^\d-]/g, '');
+        if (cleaned === '' || cleaned === '-') { input.value = ''; return; }
+        const formatted = parseInt(cleaned, 10).toLocaleString('ja-JP');
+        input.value = formatted;
+        // カーソルは末尾へ (簡易)
+        try { input.setSelectionRange(formatted.length, formatted.length); } catch (e) {}
+    });
+    input.addEventListener('blur', format);
+    if (opts && opts.runFormatNow) format();
+    return input;
+}
 
 // ==================== Turso API ====================
 async function queryTurso(sql, args = []) {
@@ -321,14 +374,13 @@ function normalizeDataMemberNames(dataArray) {
 // ==================== チーム月次解決 ====================
 // 指定月のメンバー→チーム マッピングを返す
 function getTeamsForMonth(ym) {
-    const monthHistory = teamHistoryData.filter(h => h.year_month === ym);
-    if (monthHistory.length === 0) {
-        // フォールバック: 現在の members.team_name を使用
-        const map = {};
-        membersData.forEach(m => { map[m.member_name] = m.team_name; });
-        return map;
-    }
     const map = {};
+    // membersテーブルのteam_nameをbaselineに（month_historyに登録がないメンバーも表示できるよう）
+    membersData.forEach(m => {
+        if (m.team_name) map[m.member_name] = m.team_name;
+    });
+    // 月別履歴があれば該当月のみ上書き
+    const monthHistory = teamHistoryData.filter(h => h.year_month === ym);
     monthHistory.forEach(h => { map[h.member_name] = h.team_name; });
     return map;
 }
@@ -546,16 +598,70 @@ async function ensureMembers() {
     );
 }
 
+// appointments テーブルに soft delete 用カラムを追加（マイグレーション、idempotent）
+async function ensureAppointmentSoftDeleteColumns() {
+    try { await executeTurso("ALTER TABLE appointments ADD COLUMN deleted_at TEXT"); }
+    catch (e) { /* カラム存在済み */ }
+    try { await executeTurso("ALTER TABLE appointments ADD COLUMN delete_reason TEXT"); }
+    catch (e) { /* カラム存在済み */ }
+}
+
+// 指定 project_id の全プランを plan_order 昇順で返す
+function getPlansForProject(projectId) {
+    return (projectPlansData || [])
+        .filter(p => p.project_id === projectId)
+        .sort((a, b) => (a.plan_order || 0) - (b.plan_order || 0));
+}
+
+// members テーブルに soft delete 用 deleted_at カラムを追加（idempotent）
+async function ensureMembersSoftDeleteColumn() {
+    try { await executeTurso("ALTER TABLE members ADD COLUMN deleted_at TEXT"); }
+    catch (e) { /* カラム存在済み */ }
+}
+
+// project_plans テーブル（1案件 N プラン）を作成 + 既存 projects データを plan_order=1 として移行（idempotent）
+async function ensureProjectPlansTable() {
+    try {
+        await executeTurso(
+            "CREATE TABLE IF NOT EXISTS project_plans (" +
+            "  id TEXT PRIMARY KEY," +
+            "  project_id TEXT NOT NULL," +
+            "  plan_order INTEGER NOT NULL," +
+            "  unit_price INTEGER DEFAULT 0," +
+            "  monthly_cap_count INTEGER DEFAULT 0," +
+            "  monthly_cap_amount INTEGER DEFAULT 0," +
+            "  created_at TEXT DEFAULT (datetime('now'))," +
+            "  updated_at TEXT DEFAULT (datetime('now'))," +
+            "  UNIQUE(project_id, plan_order)" +
+            ")"
+        );
+    } catch (e) { console.warn('project_plans 作成失敗:', e); }
+    try {
+        // まだ plan が無い projects を plan_order=1 として移行
+        await executeTurso(
+            "INSERT INTO project_plans (id, project_id, plan_order, unit_price, monthly_cap_count, monthly_cap_amount) " +
+            "SELECT lower(hex(randomblob(16))), p.id, 1, " +
+            "       COALESCE(p.unit_price, 0), COALESCE(p.monthly_cap_count, 0), COALESCE(p.monthly_cap_amount, 0) " +
+            "FROM projects p " +
+            "WHERE NOT EXISTS (SELECT 1 FROM project_plans pp WHERE pp.project_id = p.id)"
+        );
+    } catch (e) { console.warn('project_plans 初期移行失敗:', e); }
+}
+
 // ==================== データ読み込み ====================
 async function loadAllData() {
     showLoading();
     try {
         await ensureMembers();
+        await ensureAppointmentSoftDeleteColumns();
+        await ensureMembersSoftDeleteColumn();
+        await ensureProjectPlansTable();
         console.log('Loading master data...');
         const results = await Promise.all([
-            queryTurso("SELECT * FROM members WHERE status = 'active' ORDER BY team_name, member_name"),
-            queryTurso("SELECT * FROM teams WHERE status = 'active'"),
-            queryTurso("SELECT * FROM projects WHERE status = 'active' ORDER BY project_name"),
+            queryTurso("SELECT * FROM members WHERE status IN ('active','inactive') AND (deleted_at IS NULL) ORDER BY (status='active') DESC, team_name, member_name"),
+            queryTurso("SELECT * FROM teams WHERE status IN ('active','inactive')"),
+            queryTurso("SELECT * FROM projects WHERE status IN ('active','inactive') ORDER BY project_name"),
+            queryTurso("SELECT * FROM project_plans ORDER BY project_id, plan_order").catch(() => []),
             queryTurso("SELECT * FROM settings"),
             queryTurso("SELECT date FROM holidays"),
             queryTurso("SELECT * FROM member_team_history ORDER BY year_month, team_name, member_name")
@@ -563,14 +669,15 @@ async function loadAllData() {
 
         membersData = results[0];
         teamsData = results[1];
-        projectsData = results[2];
+        projectsData = stripExcludedProjects(results[2]);
+        projectPlansData = results[3] || [];
         settingsMap = {};
-        results[3].forEach(s => { settingsMap[s.key] = s.value; });
-        holidaysSet = new Set(results[4].map(h => h.date));
-        teamHistoryData = results[5];
+        results[4].forEach(s => { settingsMap[s.key] = s.value; });
+        holidaysSet = new Set(results[5].map(h => h.date));
+        teamHistoryData = results[6];
 
         // DBの祝日をマージ（フォールバックのHOLIDAYS_2026に追加）
-        results[4].forEach(h => { if (h.date) holidaysSet.add(h.date); });
+        results[5].forEach(h => { if (h.date) holidaysSet.add(h.date); });
 
         console.log('Master data loaded:', membersData.length, 'members,', teamsData.length, 'teams,', projectsData.length, 'projects,', holidaysSet.size, 'holidays,', teamHistoryData.length, 'team history');
 
@@ -656,6 +763,12 @@ async function loadMonthData() {
     // 同一人物の重複アポを除去（member_name + project_name + acquisition_date + customer_name）
     appointmentsData = deduplicateAppointments(appointmentsData);
     executionAppoData = deduplicateAppointments(executionAppoData);
+    // 集計除外顧客（例: 日本経済新聞）を全体から落とす
+    appointmentsData = stripExcludedAppos(appointmentsData);
+    executionAppoData = stripExcludedAppos(executionAppoData);
+    performanceData = stripExcludedAppos(performanceData);
+    appointmentsData = stripDeletedAppos(appointmentsData);
+    executionAppoData = stripDeletedAppos(executionAppoData);
 
     // KPIカード前月比用に前月データもまとめてロード
     const prevYM = getPrevYM(ym);
@@ -683,7 +796,12 @@ async function loadMonthData() {
     normalizeDataMemberNames(prevExecutionAppoData);
     prevAppointmentsData = deduplicateAppointments(prevAppointmentsData);
     prevExecutionAppoData = deduplicateAppointments(prevExecutionAppoData);
+    prevAppointmentsData = stripExcludedAppos(prevAppointmentsData);
+    prevExecutionAppoData = stripExcludedAppos(prevExecutionAppoData);
+    prevAppointmentsData = stripDeletedAppos(prevAppointmentsData);
+    prevExecutionAppoData = stripDeletedAppos(prevExecutionAppoData);
     prevPerformanceData = deduplicatePerformance(prevPerformanceData);
+    prevPerformanceData = stripExcludedAppos(prevPerformanceData);
 
     // 実績の重複排除（正規化後に同一 member_name + project_name + input_date が複数存在する場合）
     performanceData = deduplicatePerformance(performanceData);
@@ -749,6 +867,28 @@ function filterPerformance(data, filter) {
         result = result.filter(d => d.member_name === filter.member);
     }
     return result;
+}
+
+// 集計・表示から完全除外（customer_name または project_name に「日本経済新聞」を含むレコード）
+const EXCLUDED_KEYWORD = '日本経済新聞';
+function isExcludedAppo(a) {
+    if (!a) return false;
+    if ((a.customer_name || '').includes(EXCLUDED_KEYWORD)) return true;
+    if ((a.project_name || '').includes(EXCLUDED_KEYWORD)) return true;
+    return false;
+}
+function stripExcludedAppos(list) {
+    return (list || []).filter(a => !isExcludedAppo(a));
+}
+// UI からの soft delete 済みアポを集計・表示から除外
+function stripDeletedAppos(list) {
+    return (list || []).filter(a => !a.deleted_at);
+}
+function isExcludedProject(p) {
+    return p && (p.project_name || '').includes(EXCLUDED_KEYWORD);
+}
+function stripExcludedProjects(list) {
+    return (list || []).filter(p => !isExcludedProject(p));
 }
 
 function filterAppointments(data, filter) {
@@ -2072,7 +2212,7 @@ async function loadHistoricalAppointments() {
         // dedup は適用しない（acquisition_date+customer_name 単独で同一視されると、
         // 同顧客で実施予定日が複数のアポが合算されてしまうため）。
         // 月別集計用には素のレコードを保持し、各レンダー側で精緻な key で重複排除する。
-        historicalAppoData = appoData;
+        historicalAppoData = stripDeletedAppos(stripExcludedAppos(appoData));
         monthlyTotalTargets = {};
         (allTargets || []).forEach(t => { monthlyTotalTargets[t.year_month] = parseFloat(t.appointment_amount_target) || 0; });
         if (document.getElementById('mgmtHistoricalStatus')) {
@@ -2440,6 +2580,13 @@ function renderManagement(filter) {
     const execConfirmed = allExecAppo.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
     const execUnconfirmed = allExecAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
 
+    // 当月取得ゲージは 人別詳細テーブル と同じ条件(固定12名 + active案件)で集計
+    const PERSON_DETAIL_MEMBERS_SET = new Set(['松居','山本','坪井','中村た','野上','堀切','越後','松坂','清水','宮城','轟','浦上']);
+    const activeProjectNamesForGauge = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
+    const gaugeAcqAmount = allAppo
+        .filter(a => PERSON_DETAIL_MEMBERS_SET.has(a.member_name) && activeProjectNamesForGauge.has(a.project_name))
+        .reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+
     const { elapsed, total: totalDays } = getBusinessDays(ym);
     const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
 
@@ -2447,7 +2594,7 @@ function renderManagement(filter) {
     const periodTarget = calcPeriodTarget(monthlyTarget, totalDays, ym);
     const periodExecTarget = calcPeriodTarget(executionTarget, totalDays, ym);
 
-    const acqRate = periodTarget > 0 ? Math.round(acquisitionAmount / periodTarget * 1000) / 10 : 0;
+    const acqRate = periodTarget > 0 ? Math.round(gaugeAcqAmount / periodTarget * 1000) / 10 : 0;
     const execRate = periodExecTarget > 0 ? Math.round(execConfirmed / periodExecTarget * 1000) / 10 : 0;
 
     // 着地ヨミ = 実施確定 + 未確認 × (1 - キャンセル率)
@@ -2606,7 +2753,7 @@ function renderManagement(filter) {
 
     // ========== 人別 詳細データ準備（案件別と同じ列構成、アポ単価のみ除外） ==========
     // 表示メンバー: 固定12名（成果報酬チーム）
-    const PERSON_DETAIL_MEMBERS = ['松居','山本','坪井','中村た','野上','堀切','越後','松坂','清水','JB','轟','浦上'];
+    const PERSON_DETAIL_MEMBERS = ['松居','山本','坪井','中村た','野上','堀切','越後','松坂','清水','宮城','轟','浦上'];
     const activeProjectNamesPerMember = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
 
     const memberDetailData = PERSON_DETAIL_MEMBERS.map(memberName => {
@@ -2700,24 +2847,16 @@ function renderManagement(filter) {
     // 期間ラベル
     const periodLabels = { day: '日別', week: '週別', month: '月別', quarter: 'Q別', custom: 'カスタム' };
 
-    // ========== 案件別 取得実績の事前算出（カード用） ==========
-    // 「当月着地」基準: appointments で acquisition_date OR scheduled_date が当月のアポを集計
+    // ========== 当月着地（アポ確認タブの全件合計と一致） ==========
+    // アポ確認タブ renderAppointments() と同一の母集合: executionAppoData (scheduled_date 当月)
+    //   + active案件 + 除外メンバー除外。 status は 実施/リスケ/キャンセル/未確認 の4種合算。
     const activeProjectNamesForCard = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
-    const seenIdsForCard = new Set();
-    let totalAcqActualCard = 0;
-    (historicalAppoData || []).forEach(a => {
-        if (excluded.includes(a.member_name)) return;
-        if (!activeProjectNamesForCard.has(a.project_name)) return;
-        const acqIn = a.acquisition_date && a.acquisition_date.startsWith(ym);
-        const schIn = a.scheduled_date && a.scheduled_date.startsWith(ym);
-        if (!acqIn && !schIn) return;
-        const key = a.id != null
-            ? 'id_' + a.id
-            : `${a.member_name}|${a.project_name}|${a.acquisition_date || ''}|${a.scheduled_date || ''}|${a.customer_name || ''}|${a.amount || ''}`;
-        if (seenIdsForCard.has(key)) return;
-        seenIdsForCard.add(key);
-        totalAcqActualCard += parseFloat(a.amount) || 0;
-    });
+    const VALID_APPO_STATUSES = ['実施', 'リスケ', 'キャンセル', '未確認'];
+    const totalAcqActualCard = (executionAppoData || [])
+        .filter(a => !excluded.includes(a.member_name))
+        .filter(a => activeProjectNamesForCard.has(a.project_name))
+        .filter(a => VALID_APPO_STATUSES.includes(a.status))
+        .reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
     // 当月着地 専用目標 (取得目標とは別管理)
     const landingTarget = totalTarget && totalTarget.landing_amount_target
         ? parseInt(totalTarget.landing_amount_target) || 0
@@ -2757,13 +2896,13 @@ function renderManagement(filter) {
             </div>
         </div>
         <div class="mgmt-acq-summary-card">
-            <div class="mgmt-gauge-title">当月着地<span style="font-size:0.7rem;color:var(--text-light);margin-left:6px;">取得 OR 実施予定基準</span></div>
+            <div class="mgmt-gauge-title">当月着地<span style="font-size:0.7rem;color:var(--text-light);margin-left:6px;">実施予定基準（アポ確認と一致）</span></div>
             <div style="margin-top:14px;">
                 <div class="mgmt-acq-row"><span>取得目標</span><span class="mgmt-acq-value">¥${totalAcqTargetCard.toLocaleString()}</span></div>
                 <div class="mgmt-acq-row"><span>着地予定</span><span class="mgmt-acq-value" style="color:${barColorCard};">¥${totalAcqActualCard.toLocaleString()}</span></div>
                 <div class="mgmt-acq-bar"><div class="mgmt-acq-bar-fill" style="width:${barWidthCard}%;background:${barColorCard};"></div></div>
                 <div style="font-size:0.72rem;color:var(--text-light);margin-top:6px;">達成率 ${achieveRateCard}%</div>
-                <div style="font-size:0.66rem;color:var(--text-light);margin-top:4px;line-height:1.3;">※取得日 OR 実施予定日 が当月 / 全status / amount合計</div>
+                <div style="font-size:0.66rem;color:var(--text-light);margin-top:4px;line-height:1.3;">※実施予定日 が当月 / active案件 / 4status(実施・リスケ・キャンセル・未確認)合計</div>
             </div>
         </div>
         <div class="mgmt-gauge-card mgmt-yomi-card">
@@ -2840,12 +2979,15 @@ function renderManagement(filter) {
     renderHistoricalProjectStatus();
 
     // ========== チャート描画 ==========
-    const acqBreakdown = memberData.map(d => ({ name: d.name, value: d.actual }));
+    // 当月取得ゲージのbreakdown も 固定12名 + active案件 で算出（合計が表と一致するため）
+    const acqBreakdown = memberDetailData
+        .filter(d => d.acqAmount > 0)
+        .map(d => ({ name: d.name, value: d.acqAmount }));
     const execBreakdown = activeMembers.map(m => ({
         name: m.member_name,
         value: allExecAppo.filter(a => a.member_name === m.member_name && a.status === '実施').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0),
     }));
-    createGaugeChart('mgmtGaugeAcq', acquisitionAmount, periodTarget, standardProgress, '取得金額', `達成率 ${acqRate}%`, acqBreakdown);
+    createGaugeChart('mgmtGaugeAcq', gaugeAcqAmount, periodTarget, standardProgress, '取得金額', `達成率 ${acqRate}%`, acqBreakdown);
     createGaugeChart('mgmtGaugeExec', execConfirmed, periodExecTarget, standardProgress, '実施確定', `達成率 ${execRate}%`, execBreakdown);
 
     // 円グラフ中心テキスト描画プラグイン
@@ -3601,23 +3743,79 @@ function renderMemberGraphs(perfData) {
 }
 
 // ==================== Tab 2: アポ確認管理 ====================
-function renderAppointments() {
-    const filter = getFilters();
-    // executionAppoData（scheduled_dateベース）に加え、appointmentsData（acquisition_dateベース）も
-    // マージして表示。当月取得だがscheduled_dateが異なる月/NULLのアポも表示されるようにする。
-    const execFiltered = filterAppointments(executionAppoData, filter);
-    const acqFiltered = filterAppointments(appointmentsData, filter);
-    // IDベース + コンテンツベースの重複排除でマージ
-    const seenIds = new Set(execFiltered.map(a => a.id));
-    const seenKeys = new Set(execFiltered.map(a => `${a.member_name}|${a.project_name}|${a.acquisition_date}|${a.customer_name}`));
-    const merged = [...execFiltered];
-    acqFiltered.forEach(a => {
-        const key = `${a.member_name}|${a.project_name}|${a.acquisition_date}|${a.customer_name}`;
-        if (!seenIds.has(a.id) && !seenKeys.has(key)) {
-            merged.push(a);
-            seenKeys.add(key);
-        }
+// アポ確認タブ専用: 日付範囲フィルターの読み出し
+function getAppoDateFilter() {
+    return {
+        acqFrom: (document.getElementById('appoAcqFrom') || {}).value || '',
+        acqTo:   (document.getElementById('appoAcqTo')   || {}).value || '',
+        schFrom: (document.getElementById('appoSchFrom') || {}).value || '',
+        schTo:   (document.getElementById('appoSchTo')   || {}).value || ''
+    };
+}
+function onAppoDateFilterChange() {
+    // 入力範囲が当月外なら再クエリ。それ以外はクライアント側だけで再描画
+    const ym = document.getElementById('filterMonth').value;
+    const ymStart = ym + '-01';
+    const ymEnd = getEndOfMonth(ym);
+    const f = getAppoDateFilter();
+    const outOfMonth = [f.acqFrom, f.acqTo, f.schFrom, f.schTo].some(d => d && (d < ymStart || d > ymEnd));
+    if (outOfMonth) {
+        reloadAppoDataForDateRange().then(() => renderAppointments());
+    } else {
+        renderAppointments();
+    }
+}
+function clearAppoDateFilter() {
+    ['appoAcqFrom','appoAcqTo','appoSchFrom','appoSchTo'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
     });
+    renderAppointments();
+}
+// 日付範囲が当月を超える場合に、必要な範囲を Turso から追加ロード
+async function reloadAppoDataForDateRange() {
+    const ym = document.getElementById('filterMonth').value;
+    const ymStart = ym + '-01';
+    const ymEnd = getEndOfMonth(ym);
+    const f = getAppoDateFilter();
+    const dates = [ymStart, ymEnd, f.acqFrom, f.acqTo, f.schFrom, f.schTo].filter(Boolean);
+    const minDate = dates.reduce((a, b) => (a < b ? a : b));
+    const maxDate = dates.reduce((a, b) => (a > b ? a : b));
+    try {
+        const rows = await queryTurso(
+            "SELECT * FROM appointments WHERE (acquisition_date BETWEEN ? AND ?) OR (scheduled_date BETWEEN ? AND ?) ORDER BY scheduled_date",
+            [minDate, maxDate, minDate, maxDate]
+        );
+        normalizeDataMemberNames(rows);
+        executionAppoData = stripDeletedAppos(stripExcludedAppos(deduplicateAppointments(rows)));
+    } catch (e) {
+        console.error('アポ範囲再読み込み失敗:', e);
+    }
+}
+
+function renderAppointments() {
+    const ym = document.getElementById('filterMonth').value;
+    const excluded = getExcludedMembers(ym);
+    const activeProjectsForAppo = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
+
+    // アポ確認タブはグローバルのチーム/メンバー/月フィルターを無視し、
+    // 自前の日付範囲フィルター(取得日 from~to AND 実施予定日 from~to)を使う。
+    const df = getAppoDateFilter();
+    const ymStart = ym + '-01';
+    const ymEnd = getEndOfMonth(ym);
+    // 日付未入力時のデフォルトは当月（実施予定日が当月）
+    const acqFrom = df.acqFrom || '';
+    const acqTo   = df.acqTo   || '';
+    const schFrom = df.schFrom || (df.acqFrom || df.acqTo ? '' : ymStart);
+    const schTo   = df.schTo   || (df.acqFrom || df.acqTo ? '' : ymEnd);
+
+    const merged = (executionAppoData || [])
+        .filter(a => !excluded.includes(a.member_name))
+        .filter(a => activeProjectsForAppo.has(a.project_name))
+        .filter(a => !acqFrom || (a.acquisition_date && a.acquisition_date >= acqFrom))
+        .filter(a => !acqTo   || (a.acquisition_date && a.acquisition_date <= acqTo))
+        .filter(a => !schFrom || (a.scheduled_date && a.scheduled_date >= schFrom))
+        .filter(a => !schTo   || (a.scheduled_date && a.scheduled_date <= schTo));
     // ソート
     merged.sort((a, b) => {
         let va = a[appoSortKey] || '';
@@ -3704,21 +3902,42 @@ function renderAppointments() {
     `;
 
     // アポ用メンバー・案件フィルタドロップダウン更新
+    // 候補の母集団は「メンバー/案件マスター」(active のみ・除外メンバーを除く)。
+    // 表示中データ(allData)に依存させると 1行しかない時に候補が消えてしまうため。
     const appoMemberFilter = document.getElementById('appoMemberFilter');
     const appoProjectFilter = document.getElementById('appoProjectFilter');
     if (appoMemberFilter) {
         const currentMember = appoMemberFilter.value;
-        const members = [...new Set(tableBaseData.map(a => a.member_name).filter(Boolean))].sort();
-        appoMemberFilter.innerHTML = '<option value="all">全担当者</option>' +
-            members.map(m => `<option value="${m}">${displayName(m)}</option>`).join('');
-        appoMemberFilter.value = members.includes(currentMember) ? currentMember : 'all';
+        const members = membersData
+            .filter(m => m.status === 'active' && !excluded.includes(m.member_name))
+            .map(m => m.member_name)
+            .sort((a, b) => a.localeCompare(b, 'ja'));
+        const desiredOptCount = members.length + 1;
+        // 母集団が変わらない (= 同じ件数) ならカスタムセレクトの作り直しは不要
+        if (appoMemberFilter.options.length !== desiredOptCount) {
+            appoMemberFilter.innerHTML = '<option value="all">全担当者</option>' +
+                members.map(m => `<option value="${m}">${displayName(m)}</option>`).join('');
+            appoMemberFilter.value = (currentMember === 'all' || members.includes(currentMember)) ? currentMember : 'all';
+            rebuildCustomSelect('appoMemberFilter');
+        } else {
+            appoMemberFilter.value = (currentMember === 'all' || members.includes(currentMember)) ? currentMember : 'all';
+        }
     }
     if (appoProjectFilter) {
         const currentProject = appoProjectFilter.value;
-        const projects = [...new Set(tableBaseData.map(a => a.project_name).filter(Boolean))].sort();
-        appoProjectFilter.innerHTML = '<option value="all">全案件</option>' +
-            projects.map(p => `<option value="${p}">${p}</option>`).join('');
-        appoProjectFilter.value = projects.includes(currentProject) ? currentProject : 'all';
+        const projects = projectsData
+            .filter(p => p.status === 'active')
+            .map(p => p.project_name)
+            .sort((a, b) => a.localeCompare(b, 'ja'));
+        const desiredOptCount = projects.length + 1;
+        if (appoProjectFilter.options.length !== desiredOptCount) {
+            appoProjectFilter.innerHTML = '<option value="all">全案件</option>' +
+                projects.map(p => `<option value="${p}">${p}</option>`).join('');
+            appoProjectFilter.value = (currentProject === 'all' || projects.includes(currentProject)) ? currentProject : 'all';
+            rebuildCustomSelect('appoProjectFilter');
+        } else {
+            appoProjectFilter.value = (currentProject === 'all' || projects.includes(currentProject)) ? currentProject : 'all';
+        }
     }
 
     // テーブル用データ: tableBaseData（今日までフィルタ済み） + ステータスフィルタ
@@ -3760,7 +3979,7 @@ function renderAppointments() {
                 <td class="text-right number">¥${(a.amount || 0).toLocaleString()}</td>
                 <td><span class="status-badge ${statusClass}">${a.status}</span></td>
                 <td>
-                    <div style="display:flex;gap:4px;">
+                    <div style="display:flex;gap:4px;align-items:center;">
                         ${a.status === '未確認' ? `
                             <button class="status-btn btn-execute" onclick="updateAppoStatus('${a.id}','実施')">実施</button>
                             <button class="status-btn btn-reschedule" onclick="updateAppoStatus('${a.id}','リスケ')">リスケ</button>
@@ -3768,6 +3987,15 @@ function renderAppointments() {
                         ` : `
                             <button class="status-btn" onclick="updateAppoStatus('${a.id}','未確認')">戻す</button>
                         `}
+                        <button class="status-btn" title="削除（集計対象外）" onclick="deleteAppointment('${a.id}')" style="border-color:var(--border-color);color:var(--text-light);padding:4px 6px;line-height:1;">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                                <path d="M10 11v6"/>
+                                <path d="M14 11v6"/>
+                                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                            </svg>
+                        </button>
                     </div>
                 </td>
             </tr>
@@ -3806,6 +4034,33 @@ function toggleAppoRange() {
     renderAppointments();
 }
 
+
+// アポを soft delete (キャンセル率には影響させない「無効化」)
+// 元データ(スプレッドシート)が次回 sync で同キーを送ってきても deleted_at は維持されるため復活しない
+async function deleteAppointment(id) {
+    if (!confirm('このアポを削除します。\nキャンセル率などの集計には影響しません。\nよろしいですか？')) return;
+    try {
+        await executeTurso(
+            "UPDATE appointments SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+            [id]
+        );
+        // ローカルデータからも除去
+        [appointmentsData, executionAppoData, historicalAppoData].forEach(list => {
+            if (!list) return;
+            const idx = list.findIndex(a => a.id === id);
+            if (idx >= 0) list.splice(idx, 1);
+        });
+        showToast('アポを削除しました');
+        renderAppointments();
+        // 経営タブ等も再描画して集計を反映
+        if (typeof renderAll === 'function') {
+            try { renderAll(); } catch (e) { /* noop */ }
+        }
+    } catch (error) {
+        console.error('アポ削除に失敗:', error);
+        alert('削除に失敗しました: ' + error.message);
+    }
+}
 
 async function updateAppoStatus(id, newStatus) {
     console.log('updateAppoStatus called:', id, newStatus);
@@ -4215,9 +4470,8 @@ function renderProjects() {
         projectPerfStats[pn].appo += d.appointment_count || 0;
     });
 
-    // 案件カード
-    let html = '';
-    projectsData.forEach(p => {
+    // 案件カード (active / inactive を分けて描画)
+    const buildProjectCard = (p) => {
         const pid = encodeURIComponent(p.project_name);
         const cap = p.monthly_cap_count || 0;
         const actual = projectAppoCount[p.project_name] || 0;
@@ -4226,16 +4480,21 @@ function renderProjects() {
         const barWidth = cap > 0 ? Math.min(actual / cap * 100, 100) : 0;
         const isOver = cap > 0 && actual >= cap;
         const barColor = isOver ? 'var(--primary-red)' : capRate > 80 ? '#ede07d' : 'var(--primary-blue)';
+        const isInactive = p.status === 'inactive';
 
-        // アラート: 単価×架電toアポ率 < 7（架電100件以上）
         const stats = projectPerfStats[p.project_name] || { calls: 0, appo: 0 };
         const unitPrice = p.unit_price || 0;
         const cta = stats.calls > 0 ? (stats.appo / stats.calls) : 0;
         const alertScore = unitPrice * cta;
-        const hasAlert = stats.calls >= 100 && alertScore < 7;
+        const hasAlert = !isInactive && stats.calls >= 100 && alertScore < 7;
 
-        html += `
-            <div class="project-card" id="pcard-${pid}" ${hasAlert ? 'style="border-left:3px solid var(--primary-red);"' : ''}>
+        const cardExtraStyle = [
+            hasAlert ? 'border-left:3px solid var(--primary-red);' : '',
+            isInactive ? 'opacity:0.55;background:#fafafa;' : ''
+        ].filter(Boolean).join('');
+
+        return `
+            <div class="project-card" id="pcard-${pid}"${cardExtraStyle ? ` style="${cardExtraStyle}"` : ''}>
                 <div class="project-card-header">
                     <div>
                         <div class="project-name">${p.project_name} ${hasAlert ? '<span style="color:var(--primary-red);font-size:0.8rem;">⚠ 収益性注意</span>' : ''}</div>
@@ -4248,13 +4507,13 @@ function renderProjects() {
                                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
                             </svg>
                         </button>
-                        <span class="kpi-badge good">${p.status}</span>
+                        <span class="kpi-badge${isInactive ? '' : ' good'}">${p.status}</span>
                     </div>
                 </div>
                 <div class="project-cap-section">
                     <div class="project-cap-header">
                         <span class="project-meta-label">月次キャップ</span>
-                        <span class="project-cap-edit editable-field" onclick="editProjectField(this, '${escapeHtml(p.project_name)}', 'monthly_cap_count', ${cap})">${cap > 0 ? cap + '件' : '未設定'}</span>
+                        <span class="project-cap-edit editable-field" onclick="onProjectCapClick(this, '${p.id}', '${escapeHtml(p.project_name)}', ${cap})">${cap > 0 ? fmtNum(cap) + '件' : '未設定'}</span>
                     </div>
                     ${cap > 0 ? `
                         <div class="project-cap-bar-wrap">
@@ -4263,20 +4522,37 @@ function renderProjects() {
                             </div>
                         </div>
                         <div class="project-cap-stats">
-                            <span class="project-cap-actual">${actual}件<span style="color:var(--text-light);font-weight:400;"> / ${cap}件</span></span>
-                            <span class="project-cap-remaining ${isOver ? 'over' : ''}">${isOver ? 'キャップ超過' : '残り' + remaining + '件'}</span>
+                            <span class="project-cap-actual">${fmtNum(actual)}件<span style="color:var(--text-light);font-weight:400;"> / ${fmtNum(cap)}件</span></span>
+                            <span class="project-cap-remaining ${isOver ? 'over' : ''}">${isOver ? 'キャップ超過' : '残り' + fmtNum(remaining) + '件'}</span>
                         </div>
                     ` : `
                         <div class="project-cap-stats">
-                            <span class="project-cap-actual">${actual}件</span>
+                            <span class="project-cap-actual">${fmtNum(actual)}件</span>
                         </div>
                     `}
                 </div>
                 ${p.call_list_url ? `<div style="margin-top:12px;"><a href="${escapeHtml(p.call_list_url)}" target="_blank" style="color:var(--text-muted);font-size:0.8rem;">架電リスト →</a></div>` : ''}
             </div>
         `;
-    });
-    document.getElementById('projectGrid').innerHTML = html || '<p style="color:var(--text-light);padding:20px;">案件が登録されていません。</p>';
+    };
+
+    const activeProjects = projectsData.filter(p => p.status !== 'inactive');
+    const inactiveProjects = projectsData.filter(p => p.status === 'inactive');
+    const activeHtml = activeProjects.map(buildProjectCard).join('') || '<p style="color:var(--text-light);padding:20px;">案件が登録されていません。</p>';
+    // 既存と同じパターン: ユーザ入力は escapeHtml/encodeURIComponent 済み、状態値はホワイトリスト
+    document.getElementById('projectGrid').innerHTML = activeHtml;
+
+    const inactiveWrap = document.getElementById('inactiveProjectsWrap');
+    const inactiveGrid = document.getElementById('inactiveProjectGrid');
+    if (inactiveWrap && inactiveGrid) {
+        if (inactiveProjects.length > 0) {
+            inactiveGrid.innerHTML = inactiveProjects.map(buildProjectCard).join('');
+            inactiveWrap.style.display = '';
+        } else {
+            inactiveGrid.textContent = '';
+            inactiveWrap.style.display = 'none';
+        }
+    }
 
     // キャップテーブル
     renderCapTable();
@@ -4284,14 +4560,26 @@ function renderProjects() {
     renderAssignments();
 }
 
-function editProjectField(el, projectName, field, currentValue) {
+// 案件カードのキャップ数クリック時:
+// 単一プラン案件はそのままインライン編集を許可。複数プラン案件はモーダルへ誘導。
+function onProjectCapClick(el, projectId, projectName, currentValue) {
+    const plans = getPlansForProject(projectId);
+    if (plans.length > 1) {
+        alert('この案件は複数プランあるため、編集モーダルから変更してください。');
+        openProjectForm(projectId);
+        return;
+    }
+    editProjectField(el, projectName, 'monthly_cap_count', currentValue, projectId);
+}
+
+function editProjectField(el, projectName, field, currentValue, projectId) {
     if (el.querySelector('input')) return; // already editing
     const display = el.innerHTML;
     const input = document.createElement('input');
-    input.type = 'number';
     input.value = '';
-    input.placeholder = currentValue || '0';
+    input.placeholder = currentValue ? fmtNum(currentValue) : '0';
     input.style.cssText = 'width:80px;padding:4px 6px;border:1px solid var(--primary-blue);border-radius:4px;font-size:0.85rem;text-align:right;';
+    attachThousandSeparator(input);
     el.innerHTML = '';
     el.appendChild(input);
     input.focus();
@@ -4299,7 +4587,7 @@ function editProjectField(el, projectName, field, currentValue) {
     const save = async () => {
         const rawVal = input.value.trim();
         if (rawVal === '') { el.innerHTML = display; return; } // 未入力はキャンセル
-        const newVal = parseInt(rawVal) || 0;
+        const newVal = parseNum(rawVal);
         try {
             await executeTurso(
                 `UPDATE projects SET ${field} = ?, updated_at = datetime('now') WHERE project_name = ?`,
@@ -4307,6 +4595,26 @@ function editProjectField(el, projectName, field, currentValue) {
             );
             const proj = projectsData.find(p => p.project_name === projectName);
             if (proj) proj[field] = newVal;
+            // project_plans とも同期 (単一プラン案件のみ呼ばれる想定。plan が無ければ 1 行作成)
+            if (projectId && field === 'monthly_cap_count') {
+                const plans = getPlansForProject(projectId);
+                if (plans.length === 1) {
+                    const unitPrice = plans[0].unit_price || 0;
+                    await executeTurso(
+                        "UPDATE project_plans SET monthly_cap_count = ?, monthly_cap_amount = ?, updated_at = datetime('now') WHERE id = ?",
+                        [newVal, unitPrice * newVal, plans[0].id]
+                    );
+                    plans[0].monthly_cap_count = newVal;
+                    plans[0].monthly_cap_amount = unitPrice * newVal;
+                } else if (plans.length === 0) {
+                    await executeTurso(
+                        `INSERT INTO project_plans (id, project_id, plan_order, unit_price, monthly_cap_count, monthly_cap_amount)
+                         VALUES (lower(hex(randomblob(16))), ?, 1, 0, ?, 0)`,
+                        [projectId, newVal]
+                    );
+                    projectPlansData.push({ project_id: projectId, plan_order: 1, unit_price: 0, monthly_cap_count: newVal, monthly_cap_amount: 0 });
+                }
+            }
             showToast(`${projectName}のキャップを更新しました`);
             renderProjects();
         } catch (e) {
@@ -4354,15 +4662,15 @@ function renderCapTable() {
         <div class="cap-summary-grid">
             <div class="cap-summary-item">
                 <div class="cap-summary-label">合計キャップ</div>
-                <div class="cap-summary-value">${totalCap}<span class="cap-summary-unit">件</span></div>
+                <div class="cap-summary-value">${fmtNum(totalCap)}<span class="cap-summary-unit">件</span></div>
             </div>
             <div class="cap-summary-item">
                 <div class="cap-summary-label">合計実績</div>
-                <div class="cap-summary-value">${totalActual}<span class="cap-summary-unit">件</span></div>
+                <div class="cap-summary-value">${fmtNum(totalActual)}<span class="cap-summary-unit">件</span></div>
             </div>
             <div class="cap-summary-item">
                 <div class="cap-summary-label">残キャップ</div>
-                <div class="cap-summary-value" style="color:${totalRemaining <= 0 ? 'var(--primary-red)' : 'var(--text-dark)'}">${totalRemaining}<span class="cap-summary-unit">件</span></div>
+                <div class="cap-summary-value" style="color:${totalRemaining <= 0 ? 'var(--primary-red)' : 'var(--text-dark)'}">${fmtNum(totalRemaining)}<span class="cap-summary-unit">件</span></div>
             </div>
             <div class="cap-summary-item">
                 <div class="cap-summary-label">消化率</div>
@@ -4527,6 +4835,17 @@ function openAssignmentForm(editId) {
         document.getElementById('asgFormTargetCount').value = '';
         document.getElementById('asgFormSheetUrl').value = '';
     }
+    // 数値 input に 3桁カンマを適用 (一度きり attach)
+    ['asgFormCapCount','asgFormCapAmount','asgFormTargetCount'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el.dataset.sepAttached) {
+            attachThousandSeparator(el, { runFormatNow: true });
+            el.dataset.sepAttached = '1';
+        } else if (el) {
+            // 既に attach 済み → 値だけ整形
+            el.dispatchEvent(new Event('blur'));
+        }
+    });
 }
 
 function closeAssignmentForm() {
@@ -4541,9 +4860,9 @@ async function submitAssignmentForm() {
     const rank = null;
     const projectType = document.getElementById('asgFormType').value;
     const pmName = document.getElementById('asgFormPM').value || null;
-    const capCount = parseInt(document.getElementById('asgFormCapCount').value) || 0;
-    const capAmount = parseInt(document.getElementById('asgFormCapAmount').value) || 0;
-    const targetCount = parseInt(document.getElementById('asgFormTargetCount').value) || 0;
+    const capCount = parseNum(document.getElementById('asgFormCapCount').value);
+    const capAmount = parseNum(document.getElementById('asgFormCapAmount').value);
+    const targetCount = parseNum(document.getElementById('asgFormTargetCount').value);
     const sheetUrl = document.getElementById('asgFormSheetUrl').value || null;
 
     if (!memberName || !projectName) return;
@@ -4985,19 +5304,58 @@ function renderSettings() {
     if (frEl) frEl.value = settingsMap.next_month_flow_rate || '0.5';
     if (mtEl) mtEl.value = settingsMap.monthly_target_total || '16000000';
 
-    // メンバー管理テーブル
+    // チーム管理テーブル
+    const teamManageBody = document.getElementById('teamManageBody');
+    if (teamManageBody) {
+        const teamsSorted = [...(teamsData || [])].sort((a, b) => {
+            const sa = a.status === 'active' ? 0 : 1;
+            const sb = b.status === 'active' ? 0 : 1;
+            if (sa !== sb) return sa - sb;
+            return String(a.team_name || '').localeCompare(String(b.team_name || ''), 'ja');
+        });
+        teamManageBody.innerHTML = teamsSorted.map(t => {
+            const isInactive = t.status !== 'active';
+            const rowStyle = isInactive ? 'opacity:0.55;background:#fafafa;' : '';
+            const badgeClass = isInactive ? 'status-badge' : 'status-badge status-executed';
+            const leaderDisplay = t.leader_name ? normalizeMemberName(t.leader_name) : '-';
+            return `
+                <tr style="${rowStyle}">
+                    <td>${t.team_name}</td>
+                    <td>${leaderDisplay}</td>
+                    <td><span class="${badgeClass}">${t.status}</span></td>
+                    <td style="display:flex;gap:4px;">
+                        <button class="status-btn" onclick="openTeamForm('${t.id}')">編集</button>
+                        <button class="status-btn" onclick="toggleTeamStatus('${t.id}','${isInactive ? 'active' : 'inactive'}')">${isInactive ? '有効化' : '無効化'}</button>
+                        <button class="status-btn btn-cancel" onclick="deleteTeam('${t.id}')">削除</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    // メンバー管理テーブル (active が上、inactive は下に灰色トーンで)
     let memberRows = '';
-    membersData.forEach(m => {
+    const memberSortedForRender = [...membersData].sort((a, b) => {
+        const sa = a.status === 'active' ? 0 : 1;
+        const sb = b.status === 'active' ? 0 : 1;
+        if (sa !== sb) return sa - sb;
+        return String(a.team_name || '').localeCompare(String(b.team_name || ''), 'ja');
+    });
+    memberSortedForRender.forEach(m => {
+        const isInactive = m.status !== 'active';
+        const rowStyle = isInactive ? 'opacity:0.55;background:#fafafa;' : '';
+        const badgeClass = isInactive ? 'status-badge' : 'status-badge status-executed';
         memberRows += `
-            <tr>
+            <tr style="${rowStyle}">
                 <td>${displayName(m.member_name)}</td>
                 <td>${m.team_name}</td>
-                <td><span class="status-badge status-executed">${m.status}</span></td>
+                <td><span class="${badgeClass}">${m.status}</span></td>
                 <td style="display:flex;gap:4px;">
                     <button class="status-btn" onclick="openMemberForm('${m.id}')">編集</button>
-                    <button class="status-btn" onclick="toggleMemberStatus('${m.id}','${m.status === 'active' ? 'inactive' : 'active'}')">
-                        ${m.status === 'active' ? '無効化' : '有効化'}
+                    <button class="status-btn" onclick="toggleMemberStatus('${m.id}','${isInactive ? 'active' : 'inactive'}')">
+                        ${isInactive ? '有効化' : '無効化'}
                     </button>
+                    <button class="status-btn btn-cancel" onclick="deleteMember('${m.id}')">削除</button>
                 </td>
             </tr>
         `;
@@ -5114,12 +5472,11 @@ function renderDWTargetForm() {
             });
             var val = existing ? (parseInt(existing.amount_target) || 0) : 0;
             var wInput = document.createElement('input');
-            wInput.type = 'number';
-            wInput.min = '0';
             wInput.value = val || '';
             wInput.placeholder = '¥';
             wInput.id = 'dwWeek_' + w.num;
             wInput.style.cssText = weekInputS;
+            attachThousandSeparator(wInput, { runFormatNow: true });
             wCell.appendChild(wInput);
         }
         r.appendChild(wCell);
@@ -5171,12 +5528,11 @@ function renderDWTargetForm() {
 
         if (!isHoliday) {
             var input = document.createElement('input');
-            input.type = 'number';
-            input.min = '0';
             input.value = val || '';
             input.placeholder = '¥';
             input.id = 'dwDay_' + ds;
             input.style.cssText = inputS;
+            attachThousandSeparator(input, { runFormatNow: true });
             cell.appendChild(input);
         } else {
             var hLabel = document.createElement('div');
@@ -5348,7 +5704,7 @@ async function saveDWTargets() {
         for (var i = 0; i < weeks.length; i++) {
             var w = weeks[i];
             var input = document.getElementById('dwWeek_' + w.num);
-            var val = input ? (parseInt(input.value) || 0) : 0;
+            var val = input ? parseNum(input.value) : 0;
             var weekStart = ym + '-' + String(w.startDay).padStart(2, '0');
             var weekEnd = ym + '-' + String(w.endDay).padStart(2, '0');
             await executeTurso(
@@ -5365,7 +5721,7 @@ async function saveDWTargets() {
             var ds = ym + '-' + String(d).padStart(2, '0');
             if (holidaysSet.has(ds)) continue;
             var input = document.getElementById('dwDay_' + ds);
-            var val = input ? (parseInt(input.value) || 0) : 0;
+            var val = input ? parseNum(input.value) : 0;
             await executeTurso(
                 "INSERT INTO daily_targets (id, member_name, target_date, appointment_amount_target) VALUES (lower(hex(randomblob(16))), ?, ?, ?) ON CONFLICT(member_name, target_date) DO UPDATE SET appointment_amount_target=excluded.appointment_amount_target",
                 [memberName, ds, val]
@@ -5493,37 +5849,31 @@ function renderMonthlyTotalTargets() {
 
         const tdAcq = document.createElement('td');
         const acqInput = document.createElement('input');
-        acqInput.type = 'number';
-        acqInput.min = '0';
-        acqInput.step = '100000';
         acqInput.id = `mtt_acq_${ym}`;
         acqInput.value = acqVal;
-        acqInput.style.width = '160px';
-        acqInput.style.padding = '6px 10px';
+        acqInput.className = 'num-input';
+        acqInput.style.maxWidth = '180px';
+        attachThousandSeparator(acqInput, { runFormatNow: true });
         tdAcq.appendChild(acqInput);
         tr.appendChild(tdAcq);
 
         const tdExec = document.createElement('td');
         const execInput = document.createElement('input');
-        execInput.type = 'number';
-        execInput.min = '0';
-        execInput.step = '100000';
         execInput.id = `mtt_exec_${ym}`;
         execInput.value = execVal;
-        execInput.style.width = '160px';
-        execInput.style.padding = '6px 10px';
+        execInput.className = 'num-input';
+        execInput.style.maxWidth = '180px';
+        attachThousandSeparator(execInput, { runFormatNow: true });
         tdExec.appendChild(execInput);
         tr.appendChild(tdExec);
 
         const tdLanding = document.createElement('td');
         const landingInput = document.createElement('input');
-        landingInput.type = 'number';
-        landingInput.min = '0';
-        landingInput.step = '100000';
         landingInput.id = `mtt_landing_${ym}`;
         landingInput.value = landingVal;
-        landingInput.style.width = '160px';
-        landingInput.style.padding = '6px 10px';
+        landingInput.className = 'num-input';
+        landingInput.style.maxWidth = '180px';
+        attachThousandSeparator(landingInput, { runFormatNow: true });
         tdLanding.appendChild(landingInput);
         tr.appendChild(tdLanding);
 
@@ -5546,9 +5896,9 @@ async function saveMonthlyTotalTarget(ym, btn) {
     const landingEl = document.getElementById(`mtt_landing_${ym}`);
     if (!acqEl || !execEl) return;
 
-    const acqVal = parseInt(acqEl.value) || 0;
-    const execVal = parseInt(execEl.value) || 0;
-    const landingVal = landingEl ? (parseInt(landingEl.value) || 0) : 0;
+    const acqVal = parseNum(acqEl.value);
+    const execVal = parseNum(execEl.value);
+    const landingVal = landingEl ? parseNum(landingEl.value) : 0;
 
     try {
         await upsertTarget('total', 'all', ym, acqVal, execVal, landingVal);
@@ -5667,20 +6017,94 @@ function openProjectForm(projectId) {
         const p = projectsData.find(x => x.id === editingProjectId);
         if (p) {
             document.getElementById('projFormName').value = p.project_name || '';
-            document.getElementById('projFormClient').value = p.client_name || '';
-            document.getElementById('projFormUnitPrice').value = p.unit_price || '';
-            document.getElementById('projFormCapCount').value = p.monthly_cap_count || '';
-            document.getElementById('projFormCapAmount').value = p.monthly_cap_amount || '';
-            document.getElementById('projFormListUrl').value = p.call_list_url || '';
+            document.getElementById('projFormStatus').value = p.status === 'inactive' ? 'inactive' : 'active';
+            const plans = getPlansForProject(editingProjectId);
+            renderProjectPlanRows(plans.length > 0 ? plans : [{ unit_price: 0, monthly_cap_count: 0 }]);
         }
     } else {
         document.getElementById('projFormName').value = '';
-        document.getElementById('projFormClient').value = '';
-        document.getElementById('projFormUnitPrice').value = '';
-        document.getElementById('projFormCapCount').value = '';
-        document.getElementById('projFormCapAmount').value = '';
-        document.getElementById('projFormListUrl').value = '';
+        document.getElementById('projFormStatus').value = 'active';
+        renderProjectPlanRows([{ unit_price: 0, monthly_cap_count: 0 }]);
     }
+}
+
+// プラン行を一括で描画 (plans は project_plans の行配列 or 編集中の状態)
+function renderProjectPlanRows(plans) {
+    const list = document.getElementById('projFormPlansList');
+    if (!list) return;
+    list.innerHTML = '';
+    plans.forEach((plan, idx) => list.appendChild(buildProjectPlanRow(plan, idx)));
+}
+
+function buildProjectPlanRow(plan, idx) {
+    const row = document.createElement('div');
+    row.className = 'proj-plan-row';
+    row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 32px;gap:8px;margin-bottom:6px;align-items:center;';
+
+    const price = document.createElement('input');
+    price.placeholder = '例: 25,000';
+    price.value = plan.unit_price != null ? plan.unit_price : '';
+    price.className = 'proj-plan-price';
+
+    const count = document.createElement('input');
+    count.placeholder = '例: 10';
+    count.value = plan.monthly_cap_count != null ? plan.monthly_cap_count : '';
+    count.className = 'proj-plan-count';
+
+    const amount = document.createElement('input');
+    amount.readOnly = true;
+    amount.tabIndex = -1;
+    amount.className = 'proj-plan-amount';
+
+    const recalcAmount = () => {
+        const u = parseNum(price.value);
+        const c = parseNum(count.value);
+        amount.value = fmtNum(u * c);
+    };
+    attachThousandSeparator(price, { runFormatNow: true });
+    attachThousandSeparator(count, { runFormatNow: true });
+    price.addEventListener('input', recalcAmount);
+    count.addEventListener('input', recalcAmount);
+    recalcAmount();
+
+    const del = document.createElement('button');
+    del.type = 'button'; del.className = 'status-btn';
+    del.title = 'プランを削除';
+    del.style.cssText = 'padding:4px 6px;line-height:1;color:var(--text-light);border-color:var(--border-color);';
+    del.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+    del.addEventListener('click', () => {
+        const list = document.getElementById('projFormPlansList');
+        if (list && list.children.length > 1) row.remove();
+    });
+
+    row.appendChild(price);
+    row.appendChild(count);
+    row.appendChild(amount);
+    row.appendChild(del);
+    return row;
+}
+
+function addProjectPlanRow() {
+    const list = document.getElementById('projFormPlansList');
+    if (!list) return;
+    list.appendChild(buildProjectPlanRow({ unit_price: 0, monthly_cap_count: 0 }, list.children.length));
+}
+
+// モーダルから現在のプラン入力を読み出す
+function collectProjectPlanInputs() {
+    const list = document.getElementById('projFormPlansList');
+    if (!list) return [];
+    const rows = [...list.querySelectorAll('.proj-plan-row')];
+    return rows.map((row, idx) => {
+        const u = parseNum(row.querySelector('.proj-plan-price').value);
+        const c = parseNum(row.querySelector('.proj-plan-count').value);
+        return {
+            plan_order: idx + 1,
+            unit_price: u,
+            monthly_cap_count: c,
+            monthly_cap_amount: u * c
+        };
+    }).filter(p => p.unit_price > 0 || p.monthly_cap_count > 0); // 空行は捨てる
 }
 
 function closeProjectForm() {
@@ -5693,38 +6117,45 @@ async function submitProjectForm() {
     if (!name) return;
 
     try {
+        const status = document.getElementById('projFormStatus').value === 'inactive' ? 'inactive' : 'active';
+        const plans = collectProjectPlanInputs();
+        // 代表値 (他画面互換用): 単価=先頭プラン / キャップ数・金額=合計
+        const repUnitPrice = plans[0] ? plans[0].unit_price : 0;
+        const sumCapCount = plans.reduce((s, p) => s + (p.monthly_cap_count || 0), 0);
+        const sumCapAmount = plans.reduce((s, p) => s + (p.monthly_cap_amount || 0), 0);
+
+        let projectId = editingProjectId;
         if (editingProjectId) {
+            // 顧客名 / 架電リストURL の DB カラムは温存 (UI のみ削除) → UPDATE 文に含めない
             await executeTurso(
-                `UPDATE projects SET project_name = ?, client_name = ?, unit_price = ?, monthly_cap_count = ?, monthly_cap_amount = ?, call_list_url = ?, updated_at = datetime('now') WHERE id = ?`,
-                [
-                    name,
-                    document.getElementById('projFormClient').value || null,
-                    parseInt(document.getElementById('projFormUnitPrice').value) || 0,
-                    parseInt(document.getElementById('projFormCapCount').value) || null,
-                    parseInt(document.getElementById('projFormCapAmount').value) || null,
-                    document.getElementById('projFormListUrl').value || null,
-                    editingProjectId
-                ]
+                `UPDATE projects SET project_name = ?, unit_price = ?, monthly_cap_count = ?, monthly_cap_amount = ?, status = ?, updated_at = datetime('now') WHERE id = ?`,
+                [name, repUnitPrice, sumCapCount || null, sumCapAmount || null, status, editingProjectId]
             );
             showToast('案件を更新しました');
         } else {
+            // 新規 INSERT 時に id を生成しておく (後で project_plans に紐づけるため)
+            projectId = crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Math.random().toString(36).slice(2) + Date.now().toString(36);
             await executeTurso(
-                `INSERT INTO projects (id, project_name, client_name, unit_price, monthly_cap_count, monthly_cap_amount, call_list_url)
-                 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)`,
-                [
-                    name,
-                    document.getElementById('projFormClient').value || null,
-                    parseInt(document.getElementById('projFormUnitPrice').value) || 0,
-                    parseInt(document.getElementById('projFormCapCount').value) || null,
-                    parseInt(document.getElementById('projFormCapAmount').value) || null,
-                    document.getElementById('projFormListUrl').value || null
-                ]
+                `INSERT INTO projects (id, project_name, unit_price, monthly_cap_count, monthly_cap_amount, status)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [projectId, name, repUnitPrice, sumCapCount || null, sumCapAmount || null, status]
             );
             showToast('案件を追加しました');
         }
 
+        // プランを全置換 (シンプル方式)
+        await executeTurso("DELETE FROM project_plans WHERE project_id = ?", [projectId]);
+        for (const p of plans) {
+            await executeTurso(
+                `INSERT INTO project_plans (id, project_id, plan_order, unit_price, monthly_cap_count, monthly_cap_amount)
+                 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)`,
+                [projectId, p.plan_order, p.unit_price, p.monthly_cap_count, p.monthly_cap_amount]
+            );
+        }
+
         closeProjectForm();
-        projectsData = await queryTurso("SELECT * FROM projects WHERE status = 'active' ORDER BY project_name");
+        projectsData = stripExcludedProjects(await queryTurso("SELECT * FROM projects WHERE status IN ('active','inactive') ORDER BY project_name"));
+        projectPlansData = await queryTurso("SELECT * FROM project_plans ORDER BY project_id, plan_order").catch(() => []);
         renderProjects();
     } catch (error) {
         alert((editingProjectId ? '案件の更新' : '案件の追加') + 'に失敗しました: ' + error.message);
@@ -5793,7 +6224,7 @@ async function submitMemberForm() {
         );
 
         closeMemberForm();
-        membersData = await queryTurso("SELECT * FROM members WHERE status = 'active' ORDER BY team_name, member_name");
+        membersData = await queryTurso("SELECT * FROM members WHERE status IN ('active','inactive') AND (deleted_at IS NULL) ORDER BY (status='active') DESC, team_name, member_name");
         teamHistoryData = await queryTurso("SELECT * FROM member_team_history ORDER BY year_month, team_name, member_name");
         populateTeamFilter();
         populateMemberFilter();
@@ -5807,11 +6238,211 @@ async function submitMemberForm() {
 async function toggleMemberStatus(id, newStatus) {
     try {
         await executeTurso("UPDATE members SET status = ? WHERE id = ?", [newStatus, id]);
-        membersData = await queryTurso("SELECT * FROM members WHERE status = 'active' ORDER BY team_name, member_name");
+        membersData = await queryTurso("SELECT * FROM members WHERE status IN ('active','inactive') AND (deleted_at IS NULL) ORDER BY (status='active') DESC, team_name, member_name");
         populateMemberFilter();
         renderSettings();
     } catch (error) {
         alert('ステータス変更に失敗しました: ' + error.message);
+    }
+}
+
+// ==================== チーム管理 ====================
+let editingTeamId = null;
+// チーム編集モーダル: メンバーの保留状態 (保存ボタンで DB 反映、キャンセルで破棄)
+let teamFormPendingMemberIds = [];  // モーダル上の「所属メンバー」最新状態 (member.id の配列)
+let teamFormOriginalMemberIds = []; // モーダルを開いた時点のスナップショット (差分計算用)
+
+function openTeamForm(teamId) {
+    editingTeamId = teamId || null;
+    document.getElementById('teamFormModal').classList.remove('hidden');
+    document.getElementById('teamFormTitle').textContent = editingTeamId ? 'チーム編集' : 'チーム追加';
+
+    // リーダー select の選択肢を「active メンバー」で構築
+    const leaderSel = document.getElementById('teamFormLeader');
+    const activeMembers = membersData
+        .filter(m => m.status === 'active')
+        .sort((a, b) => String(a.member_name || '').localeCompare(String(b.member_name || ''), 'ja'));
+    leaderSel.innerHTML = '<option value="">（未選択）</option>' +
+        activeMembers.map(m => `<option value="${m.member_name}">${displayName(m.member_name)}</option>`).join('');
+
+    let currentTeamName = '';
+    if (editingTeamId) {
+        const t = teamsData.find(x => x.id === editingTeamId);
+        if (t) {
+            currentTeamName = t.team_name || '';
+            document.getElementById('teamFormName').value = currentTeamName;
+            const leaderCanon = t.leader_name ? normalizeMemberName(t.leader_name) : '';
+            leaderSel.value = leaderCanon && activeMembers.some(m => m.member_name === leaderCanon) ? leaderCanon : '';
+            document.getElementById('teamFormStatus').value = t.status === 'inactive' ? 'inactive' : 'active';
+        }
+        document.getElementById('teamFormMembersSection').style.display = '';
+        // 現在の所属メンバーをスナップショット & 編集中の保留状態にコピー
+        teamFormOriginalMemberIds = membersData
+            .filter(m => m.status === 'active' && m.team_name === currentTeamName)
+            .map(m => m.id);
+        teamFormPendingMemberIds = [...teamFormOriginalMemberIds];
+        renderTeamMemberChips(currentTeamName);
+    } else {
+        document.getElementById('teamFormName').value = '';
+        leaderSel.value = '';
+        document.getElementById('teamFormStatus').value = 'active';
+        document.getElementById('teamFormMembersSection').style.display = 'none';
+        teamFormOriginalMemberIds = [];
+        teamFormPendingMemberIds = [];
+    }
+
+    // モーダル内 select もカスタム化 (検索可能 dropdown)
+    rebuildCustomSelect('teamFormLeader');
+}
+
+// チーム編集モーダル: 所属メンバーをチップ表示 + 追加 dropdown を再構築
+// 保存ボタンが押されるまでは DB に書き込まない (保留状態のみ更新)
+function renderTeamMemberChips(teamName) {
+    const chipsEl = document.getElementById('teamFormMemberChips');
+    const addSel = document.getElementById('teamFormAddMember');
+    if (!chipsEl || !addSel) return;
+
+    const pendingIds = new Set(teamFormPendingMemberIds);
+    const belongs = membersData
+        .filter(m => m.status === 'active' && pendingIds.has(m.id))
+        .sort((a, b) => String(a.member_name || '').localeCompare(String(b.member_name || ''), 'ja'));
+
+    chipsEl.innerHTML = belongs.length === 0
+        ? '<span style="color:var(--text-light);font-size:0.8rem;">(所属メンバーなし)</span>'
+        : belongs.map(m => `
+            <span style="display:inline-flex;align-items:center;gap:6px;background:var(--blue-50,#e9eefb);color:var(--primary-blue,#3b6cf0);font-size:0.82rem;padding:4px 6px 4px 10px;border-radius:14px;">
+                ${displayName(m.member_name)}
+                <button type="button" title="このチームから外す（保存で確定）" onclick="removeMemberFromTeam('${m.id}', '${escapeHtml(teamName)}')" style="background:transparent;border:none;color:inherit;cursor:pointer;font-size:0.95rem;line-height:1;padding:0 2px;">×</button>
+            </span>
+        `).join('');
+
+    // 追加 dropdown: 現在の保留チップに居ない active メンバー
+    const candidates = membersData
+        .filter(m => m.status === 'active' && !pendingIds.has(m.id))
+        .sort((a, b) => String(a.member_name || '').localeCompare(String(b.member_name || ''), 'ja'));
+    addSel.innerHTML = '<option value="">＋ メンバー追加</option>' +
+        candidates.map(m => `<option value="${m.id}">${displayName(m.member_name)} ｜ ${m.team_name}</option>`).join('');
+    addSel.onchange = () => {
+        const id = addSel.value;
+        if (!id) return;
+        addMemberToTeam(id, teamName);
+    };
+    rebuildCustomSelect('teamFormAddMember');
+}
+
+// 保留リストに追加 (DB 書き込みは保存時)
+function addMemberToTeam(memberId, teamName) {
+    if (!teamFormPendingMemberIds.includes(memberId)) {
+        teamFormPendingMemberIds.push(memberId);
+    }
+    renderTeamMemberChips(teamName);
+}
+
+// 保留リストから除去 (DB 書き込みは保存時)
+function removeMemberFromTeam(memberId, teamName) {
+    teamFormPendingMemberIds = teamFormPendingMemberIds.filter(id => id !== memberId);
+    renderTeamMemberChips(teamName);
+}
+
+function closeTeamForm() {
+    document.getElementById('teamFormModal').classList.add('hidden');
+    editingTeamId = null;
+    // 保留中の変更は破棄
+    teamFormPendingMemberIds = [];
+    teamFormOriginalMemberIds = [];
+}
+
+async function submitTeamForm() {
+    const name = document.getElementById('teamFormName').value.trim();
+    if (!name) return;
+    const leader = document.getElementById('teamFormLeader').value.trim() || null;
+    const status = document.getElementById('teamFormStatus').value === 'inactive' ? 'inactive' : 'active';
+    try {
+        if (editingTeamId) {
+            await executeTurso(
+                "UPDATE teams SET team_name = ?, leader_name = ?, status = ? WHERE id = ?",
+                [name, leader, status, editingTeamId]
+            );
+
+            // 所属メンバーの差分を一括反映
+            const original = new Set(teamFormOriginalMemberIds);
+            const pending = new Set(teamFormPendingMemberIds);
+            const removed = [...original].filter(id => !pending.has(id));
+            const added = [...pending].filter(id => !original.has(id));
+            for (const id of removed) {
+                await executeTurso("UPDATE members SET team_name = ? WHERE id = ?", ['未所属', id]);
+                const m = membersData.find(x => x.id === id);
+                if (m) m.team_name = '未所属';
+            }
+            for (const id of added) {
+                await executeTurso("UPDATE members SET team_name = ? WHERE id = ?", [name, id]);
+                const m = membersData.find(x => x.id === id);
+                if (m) m.team_name = name;
+            }
+
+            showToast('チームを更新しました');
+        } else {
+            await executeTurso(
+                "INSERT INTO teams (team_name, leader_name, status) VALUES (?, ?, ?)",
+                [name, leader, status]
+            );
+            showToast('チームを追加しました');
+        }
+        closeTeamForm();
+        teamsData = await queryTurso("SELECT * FROM teams WHERE status IN ('active','inactive')");
+        populateTeamFilter();
+        populateMemberFilter();
+        renderSettings();
+    } catch (error) {
+        alert('チーム保存に失敗しました: ' + error.message);
+    }
+}
+
+async function deleteTeam(id) {
+    const t = teamsData.find(x => x.id === id);
+    if (!t) return;
+    // active メンバーが残っているチームは削除させない
+    const activeMembersInTeam = membersData.filter(m => m.team_name === t.team_name && m.status === 'active');
+    if (activeMembersInTeam.length > 0) {
+        alert(`このチームには active メンバーが ${activeMembersInTeam.length} 名います。\n先にメンバーを別チームへ移動するか、無効化・削除してください。`);
+        return;
+    }
+    if (!confirm(`チーム「${t.team_name}」を削除します。\nよろしいですか？`)) return;
+    try {
+        await executeTurso("DELETE FROM teams WHERE id = ?", [id]);
+        teamsData = await queryTurso("SELECT * FROM teams WHERE status IN ('active','inactive')");
+        populateTeamFilter();
+        renderSettings();
+        showToast('チームを削除しました');
+    } catch (error) {
+        alert('チーム削除に失敗しました: ' + error.message);
+    }
+}
+
+async function toggleTeamStatus(id, newStatus) {
+    try {
+        await executeTurso("UPDATE teams SET status = ? WHERE id = ?", [newStatus, id]);
+        teamsData = await queryTurso("SELECT * FROM teams WHERE status IN ('active','inactive')");
+        populateTeamFilter();
+        renderSettings();
+    } catch (error) {
+        alert('チームステータス変更に失敗しました: ' + error.message);
+    }
+}
+
+// メンバー削除 (soft delete: deleted_at マーキング)
+async function deleteMember(id) {
+    const m = membersData.find(x => x.id === id);
+    const name = m ? displayName(m.member_name) : '';
+    if (!confirm(`メンバー「${name}」を削除します。\n画面・集計から完全に除外されますが、DBにはデータは残ります。\nよろしいですか？`)) return;
+    try {
+        await executeTurso("UPDATE members SET deleted_at = datetime('now') WHERE id = ?", [id]);
+        membersData = await queryTurso("SELECT * FROM members WHERE status IN ('active','inactive') AND (deleted_at IS NULL) ORDER BY (status='active') DESC, team_name, member_name");
+        populateMemberFilter();
+        renderSettings();
+        showToast('メンバーを削除しました');
+    } catch (error) {
+        alert('削除に失敗しました: ' + error.message);
     }
 }
 
@@ -5842,6 +6473,9 @@ function switchTab(tab) {
             filters.style.display = 'flex';
             if (teamGroup) teamGroup.style.display = 'none';
             if (memberGroup) memberGroup.style.display = 'none';
+        } else if (tab === 'appointments') {
+            // アポ確認タブは独自の日付範囲フィルターを使うため、上部グローバルは隠す
+            filters.style.display = 'none';
         } else {
             filters.style.display = 'flex';
             if (teamGroup) teamGroup.style.display = '';
@@ -6041,9 +6675,9 @@ function getTarget(type, name, ym) {
 
 function getBusinessDays(ym) {
     const [y, m] = ym.split('-').map(Number);
-    // 経過営業日は本日を含めてカウント（当月データには本日分も含まれるため）
+    // 経過営業日は前日までをカウント（標準進捗を前日基準で表示）
     const today = new Date();
-    today.setHours(23, 59, 59, 999);
+    today.setHours(0, 0, 0, 0);
     const lastDay = new Date(y, m, 0).getDate();
 
     let total = 0;
@@ -6058,7 +6692,7 @@ function getBusinessDays(ym) {
         if (dow === 0 || dow === 6 || holidaysSet.has(dateStr)) continue;
 
         total++;
-        if (date <= today) elapsed++;
+        if (date < today) elapsed++;
     }
 
     return { elapsed, total };

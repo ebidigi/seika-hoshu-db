@@ -132,7 +132,26 @@
 
                 <!-- Tab 2: アポ確認管理 -->
                 <div class="tab-content" id="tab-appointments">
-                    <div class="section-title">アポイント確認管理 <span style="font-size:0.75rem;color:var(--text-light);font-weight:normal;margin-left:8px;">※ 当月実施予定のアポを表示</span></div>
+                    <div class="section-title">アポイント確認管理 <span style="font-size:0.75rem;color:var(--text-light);font-weight:normal;margin-left:8px;">※ 日付範囲で絞り込み（未入力は当月）</span></div>
+                    <div id="appoDateFilterBar" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:#f7f8fa;border-radius:8px;">
+                        <div style="display:flex;flex-direction:column;gap:4px;">
+                            <label style="font-size:0.72rem;color:var(--text-light);">取得日</label>
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <input type="date" id="appoAcqFrom" onchange="onAppoDateFilterChange()" style="padding:5px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;">
+                                <span style="color:var(--text-light);">〜</span>
+                                <input type="date" id="appoAcqTo" onchange="onAppoDateFilterChange()" style="padding:5px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;">
+                            </div>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:4px;">
+                            <label style="font-size:0.72rem;color:var(--text-light);">実施予定日</label>
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <input type="date" id="appoSchFrom" onchange="onAppoDateFilterChange()" style="padding:5px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;">
+                                <span style="color:var(--text-light);">〜</span>
+                                <input type="date" id="appoSchTo" onchange="onAppoDateFilterChange()" style="padding:5px 8px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;">
+                            </div>
+                        </div>
+                        <button class="btn-secondary" onclick="clearAppoDateFilter()" style="font-size:0.75rem;padding:6px 12px;">クリア</button>
+                    </div>
                     <div id="appo-status-summary"></div>
                     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
                         <div class="appo-status-tabs" id="appoStatusTabs">
@@ -145,10 +164,10 @@
                             <button class="appo-status-tab" data-status="キャンセル" onclick="filterAppoStatus('キャンセル')">キャンセル</button>
                         </div>
                         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                            <select id="appoMemberFilter" onchange="renderAppointments()" style="padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;">
+                            <select id="appoMemberFilter" onchange="renderAppointments()" style="padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;appearance:auto;-webkit-appearance:menulist;background-image:none;">
                                 <option value="all">全担当者</option>
                             </select>
-                            <select id="appoProjectFilter" onchange="renderAppointments()" style="padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;">
+                            <select id="appoProjectFilter" onchange="renderAppointments()" style="padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;appearance:auto;-webkit-appearance:menulist;background-image:none;">
                                 <option value="all">全案件</option>
                             </select>
                             <input type="text" id="appoSearchInput" placeholder="顧客名で検索" oninput="renderAppointments()" style="padding:6px 12px;border:1px solid var(--border-color);border-radius:6px;font-size:0.8rem;width:160px;">
@@ -185,6 +204,11 @@
                         <button class="btn-primary" onclick="openProjectForm()">+ 新規案件</button>
                     </div>
                     <div class="project-grid" id="projectGrid"></div>
+
+                    <div id="inactiveProjectsWrap" style="margin-top:24px;display:none;">
+                        <div class="section-title" style="margin-bottom:12px;color:var(--text-light);font-size:0.95rem;">無効化された案件</div>
+                        <div class="project-grid" id="inactiveProjectGrid"></div>
+                    </div>
 
                     <!-- アサイン管理 -->
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:32px;margin-bottom:16px;">
@@ -297,9 +321,28 @@
                         <button class="save-btn" onclick="saveDWTargets()" style="margin-top:12px;">保存</button>
                     </div>
 
+                    <!-- チーム管理 -->
+                    <div class="settings-section">
+                        <h3>チーム管理</h3>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table" id="teamManageTable">
+                                <thead>
+                                    <tr>
+                                        <th>チーム名</th>
+                                        <th>リーダー</th>
+                                        <th>ステータス</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="teamManageBody"></tbody>
+                            </table>
+                        </div>
+                        <button class="btn-primary" style="margin-top:12px;" onclick="openTeamForm()">+ チーム追加</button>
+                    </div>
+
                     <!-- メンバー管理 -->
                     <div class="settings-section">
-                        <h3>メンバー・チーム管理</h3>
+                        <h3>メンバー管理</h3>
                         <div style="overflow-x:auto;">
                             <table class="data-table" id="memberManageTable">
                                 <thead>
@@ -354,31 +397,33 @@
             </div>
             <form onsubmit="event.preventDefault();submitProjectForm();">
                 <div class="form-grid">
-                    <div class="form-field">
+                    <div class="form-field" style="grid-column:1 / -1;">
                         <label>案件名 *</label>
                         <input type="text" id="projFormName" required>
                     </div>
                     <div class="form-field">
-                        <label>顧客名</label>
-                        <input type="text" id="projFormClient">
-                    </div>
-                    <div class="form-field">
-                        <label>アポ単価</label>
-                        <input type="number" id="projFormUnitPrice" min="0">
-                    </div>
-                    <div class="form-field">
-                        <label>月次キャップ数</label>
-                        <input type="number" id="projFormCapCount" min="0">
-                    </div>
-                    <div class="form-field">
-                        <label>月次キャップ金額</label>
-                        <input type="number" id="projFormCapAmount" min="0">
-                    </div>
-                    <div class="form-field">
-                        <label>架電リストURL</label>
-                        <input type="url" id="projFormListUrl">
+                        <label>ステータス</label>
+                        <select id="projFormStatus">
+                            <option value="active">active（アクティブ）</option>
+                            <option value="inactive">inactive（無効化）</option>
+                        </select>
                     </div>
                 </div>
+
+                <div style="margin-top:18px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <label style="font-weight:600;color:var(--text-dark);font-size:0.9rem;">プラン</label>
+                        <button type="button" class="btn-secondary" onclick="addProjectPlanRow()" style="font-size:0.75rem;padding:4px 10px;">＋ プラン追加</button>
+                    </div>
+                    <div id="projFormPlansHeader" style="display:grid;grid-template-columns:1fr 1fr 1fr 32px;gap:8px;margin-bottom:4px;padding:0 2px;">
+                        <span>アポ単価</span>
+                        <span>月次キャップ数</span>
+                        <span>月次キャップ金額 <span style="font-weight:400;opacity:0.75;">(自動)</span></span>
+                        <span></span>
+                    </div>
+                    <div id="projFormPlansList"></div>
+                </div>
+
                 <div class="form-actions">
                     <button type="button" class="btn-secondary" onclick="closeProjectForm()">キャンセル</button>
                     <button type="submit" class="btn-primary">保存</button>
@@ -412,6 +457,52 @@
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn-secondary" onclick="closeMemberForm()">キャンセル</button>
+                    <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- チームフォームモーダル -->
+    <div class="modal-overlay hidden" id="teamFormModal">
+        <div class="modal-content" style="overflow:visible;">
+            <div class="modal-header">
+                <h3 id="teamFormTitle">チーム追加</h3>
+                <button class="modal-close" onclick="closeTeamForm()">&times;</button>
+            </div>
+            <form onsubmit="event.preventDefault();submitTeamForm();">
+                <div class="form-grid">
+                    <div class="form-field" style="grid-column:1 / -1;">
+                        <label>チーム名 *</label>
+                        <input type="text" id="teamFormName" required>
+                    </div>
+                    <div class="form-field">
+                        <label>リーダー</label>
+                        <select id="teamFormLeader" data-custom-select="1">
+                            <option value="">（未選択）</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>ステータス</label>
+                        <select id="teamFormStatus">
+                            <option value="active">active（アクティブ）</option>
+                            <option value="inactive">inactive（無効化）</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="teamFormMembersSection" style="margin-top:18px;display:none;">
+                    <label style="font-weight:600;color:var(--text-dark);font-size:0.9rem;display:block;margin-bottom:8px;">所属メンバー</label>
+                    <div id="teamFormMemberChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:30px;"></div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <select id="teamFormAddMember" data-custom-select="1" style="min-width:200px;">
+                            <option value="">＋ メンバー追加</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeTeamForm()">キャンセル</button>
                     <button type="submit" class="btn-primary">保存</button>
                 </div>
             </form>

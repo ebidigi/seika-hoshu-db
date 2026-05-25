@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS appointments (
   reschedule_date TEXT,
   customer_name TEXT,
   memo TEXT,
+  deleted_at TEXT,
+  delete_reason TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -74,6 +76,19 @@ CREATE INDEX IF NOT EXISTS idx_appo_project ON appointments(project_name);
 CREATE INDEX IF NOT EXISTS idx_appo_status ON appointments(status);
 CREATE INDEX IF NOT EXISTS idx_appo_scheduled ON appointments(scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_appo_acquisition ON appointments(acquisition_date);
+
+-- 案件プラン (1案件 N プラン、単価別)
+CREATE TABLE IF NOT EXISTS project_plans (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  plan_order INTEGER NOT NULL,
+  unit_price INTEGER DEFAULT 0,
+  monthly_cap_count INTEGER DEFAULT 0,
+  monthly_cap_amount INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(project_id, plan_order)
+);
 
 -- 案件月次キャップ管理
 CREATE TABLE IF NOT EXISTS project_monthly_caps (

@@ -1264,6 +1264,66 @@ th.sortable:hover { background: var(--gray-200); }
     margin-top: 20px;
 }
 
+/* 動的に作る数値入力欄 (月別総目標、週/日別目標、案件プランなど) 共通 */
+.num-input {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-white);
+    color: var(--text-dark);
+    text-align: right;
+}
+.num-input:focus {
+    outline: none;
+    border-color: var(--primary-blue);
+    box-shadow: 0 0 0 2px var(--blue-50);
+}
+.num-input[readonly] {
+    background: #f7f8fa;
+    color: var(--text-light);
+    cursor: not-allowed;
+}
+.num-input[readonly]:focus {
+    border-color: var(--border-color);
+    box-shadow: none;
+}
+
+/* 案件編集モーダル: プラン行 */
+.proj-plan-row input {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-white);
+    color: var(--text-dark);
+}
+.proj-plan-row input:focus {
+    outline: none;
+    border-color: var(--primary-blue);
+    box-shadow: 0 0 0 2px var(--blue-50);
+}
+.proj-plan-row input[readonly] {
+    background: #f7f8fa;
+    color: var(--text-light);
+    cursor: not-allowed;
+}
+.proj-plan-row input[readonly]:focus {
+    border-color: var(--border-color);
+    box-shadow: none;
+}
+#projFormPlansHeader span {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-light);
+}
+
 .btn-primary {
     padding: 8px 24px;
     background: var(--primary-blue);
@@ -2716,9 +2776,12 @@ select option:hover {
     background: white;
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-    z-index: 1000;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    z-index: 100000;
     padding: 4px 0;
+}
+.custom-select-wrap.open {
+    z-index: 100000;
 }
 .custom-select-wrap.open .custom-select-options {
     display: block;
