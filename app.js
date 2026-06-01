@@ -5820,18 +5820,17 @@ function renderMonthlyTotalTargets() {
     const tbody = document.getElementById('monthlyTargetBody');
     if (!tbody) return;
 
-    // 月リスト: 2026-01 〜 当月+1
+    // 月リスト: 翌月 / 当月 / 前月 / 前々月 の4ヶ月（直近が上）
     const today = new Date();
     const months = [];
-    let y = 2026, m = 1;
-    const endYear = today.getMonth() === 11 ? today.getFullYear() + 1 : today.getFullYear();
-    const endMonth = today.getMonth() === 11 ? 1 : today.getMonth() + 2;
-    while (y < endYear || (y === endYear && m <= endMonth)) {
+    let y = today.getFullYear();
+    let m = today.getMonth() + 2; // 翌月から開始
+    if (m > 12) { m -= 12; y += 1; }
+    for (let i = 0; i < 4; i++) {
+        if (m < 1) { m += 12; y -= 1; }
         months.push(y + '-' + String(m).padStart(2, '0'));
-        m++;
-        if (m > 12) { m = 1; y++; }
+        m--;
     }
-    months.reverse(); // 直近を上に
 
     tbody.textContent = '';
     months.forEach(ym => {
