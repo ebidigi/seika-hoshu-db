@@ -520,6 +520,37 @@
         </div>
     </div>
 
+    <!-- リスケモーダル -->
+    <div class="modal-overlay hidden" id="rescheduleModal" onclick="if(event.target===this)closeRescheduleModal()">
+        <div class="modal-content" style="max-width:440px;">
+            <div class="modal-header">
+                <h3>リスケ</h3>
+                <button class="modal-close" onclick="closeRescheduleModal()">&times;</button>
+            </div>
+            <form onsubmit="event.preventDefault();submitRescheduleModal();">
+                <input type="hidden" id="rescheduleAppoId">
+                <div style="padding:8px 0 14px 0;color:var(--text-light);font-size:0.85rem;line-height:1.6;">
+                    <div><span style="color:var(--text-muted);">顧客:</span> <span id="rescheduleCustomer" style="color:var(--text-dark);font-weight:600;"></span></div>
+                    <div><span style="color:var(--text-muted);">当初予定日:</span> <span id="rescheduleOriginalDate" style="color:var(--text-dark);"></span></div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-field full-width">
+                        <label>新しい実施予定日 *</label>
+                        <input type="date" id="rescheduleNewDate" required>
+                    </div>
+                    <div class="form-field full-width">
+                        <label>メモ（任意）</label>
+                        <textarea id="rescheduleMemo" rows="2" style="width:100%;resize:vertical;"></textarea>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeRescheduleModal()">キャンセル</button>
+                    <button type="submit" class="btn-primary">確定</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- アサインフォームモーダル -->
     <div class="modal-overlay hidden" id="assignmentFormModal">
         <div class="modal-content">

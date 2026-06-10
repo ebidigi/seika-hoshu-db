@@ -724,10 +724,10 @@ async function loadMonthData() {
             "SELECT * FROM project_member_assignments WHERE year_month = ? ORDER BY rank, project_name, member_name",
             [ym]
         ),
-        // 当月実施予定アポ（前月以前取得含む）
+        // 当月実施予定アポ(前月以前取得含む) + 当月取得アポ(翌月以降実施のリスケ対象含む)
         queryTurso(
-            "SELECT * FROM appointments WHERE scheduled_date >= ? AND scheduled_date <= ? ORDER BY scheduled_date",
-            [startDate, endDate]
+            "SELECT * FROM appointments WHERE (scheduled_date >= ? AND scheduled_date <= ?) OR (acquisition_date >= ? AND acquisition_date <= ?) ORDER BY scheduled_date",
+            [startDate, endDate, startDate, endDate]
         ),
         // 予定報告データ
         queryTurso(
@@ -3844,10 +3844,24 @@ function renderAppointments() {
 
     const statusCounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
     const statusAmounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
+    // 「翌月以降リスケ」判定: scheduled_date が当月内 & reschedule_date が翌月初日以上
+    // それ以外のリスケ (当月内 / reschedule_date 未入力) は表示しない仕様
+    const nextYM = getNextYM(ym);
+    const nextStart = nextYM + '-01';
+    let rescheduleNextCount = 0, rescheduleNextAmount = 0;
     summaryData.forEach(a => {
         if (statusCounts[a.status] !== undefined) {
             statusCounts[a.status]++;
             statusAmounts[a.status] += a.amount || 0;
+        }
+        if (a.status === 'リスケ') {
+            // 取得日が当月 & 実施日時が翌月以降 = 当月取得アポが翌月以降にリスケされたもの
+            const acqInMonth = a.acquisition_date && a.acquisition_date >= ymStart && a.acquisition_date <= ymEnd;
+            const schNextOrLater = a.scheduled_date && a.scheduled_date >= nextStart;
+            if (acqInMonth && schNextOrLater) {
+                rescheduleNextCount++;
+                rescheduleNextAmount += a.amount || 0;
+            }
         }
     });
 
@@ -3865,7 +3879,8 @@ function renderAppointments() {
     const total = summaryData.length;
     const executeRate = total > 0 ? (statusCounts['実施'] / total * 100).toFixed(1) : '0';
     const cancelRate = total > 0 ? (statusCounts['キャンセル'] / total * 100).toFixed(1) : '0';
-    const rescheduleRate = total > 0 ? (statusCounts['リスケ'] / total * 100).toFixed(1) : '0';
+    // リスケ率の分子は「翌月リスケ」のみ。分母はモ集団 (total)
+    const rescheduleRate = total > 0 ? (rescheduleNextCount / total * 100).toFixed(1) : '0';
     const unconfirmedRate = total > 0 ? (statusCounts['未確認'] / total * 100).toFixed(1) : '0';
 
     const totalAmount = statusAmounts['実施'] + statusAmounts['リスケ'] + statusAmounts['キャンセル'] + statusAmounts['未確認'];
@@ -3883,10 +3898,10 @@ function renderAppointments() {
                 <div class="rate-label">実施確定</div>
                 <div style="font-size:0.85rem;font-weight:600;color:var(--primary-blue);margin-top:2px;">¥${statusAmounts['実施'].toLocaleString()}</div>
             </div>
-            <div class="rate-card rate-card-clickable${_act('リスケ')}" onclick="filterAppoStatus('リスケ')">
-                <div class="rate-value" style="color:#8a7a00;">${statusCounts['リスケ']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${rescheduleRate}%)</span></div>
-                <div class="rate-label">リスケ</div>
-                <div style="font-size:0.85rem;font-weight:600;color:#8a7a00;margin-top:2px;">¥${statusAmounts['リスケ'].toLocaleString()}</div>
+            <div class="rate-card rate-card-clickable${_act('リスケ')}" onclick="filterAppoStatus('リスケ')" title="当月実施予定だったアポのうち、翌月以降にリスケされたもの">
+                <div class="rate-value" style="color:#8a7a00;">${rescheduleNextCount}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${rescheduleRate}%)</span></div>
+                <div class="rate-label">リスケ<span style="font-size:0.7rem;color:var(--text-muted);margin-left:4px;">(翌月以降)</span></div>
+                <div style="font-size:0.85rem;font-weight:600;color:#8a7a00;margin-top:2px;">¥${rescheduleNextAmount.toLocaleString()}</div>
             </div>
             <div class="rate-card rate-card-clickable${_act('キャンセル')}" onclick="filterAppoStatus('キャンセル')">
                 <div class="rate-value" style="color:var(--primary-red);">${statusCounts['キャンセル']}件<span style="font-size:0.75rem;font-weight:500;margin-left:4px;">(${cancelRate}%)</span></div>
@@ -3941,7 +3956,20 @@ function renderAppointments() {
     }
 
     // テーブル用データ: tableBaseData（今日までフィルタ済み） + ステータスフィルタ
-    let filtered = currentAppoFilter === 'all' ? tableBaseData : tableBaseData.filter(a => a.status === currentAppoFilter);
+    // リスケ タブは「翌月以降リスケ」のみ表示（当月内・NULL は非表示）
+    let filtered;
+    if (currentAppoFilter === 'all') {
+        filtered = tableBaseData;
+    } else if (currentAppoFilter === 'リスケ') {
+        // 取得日が当月 & 実施日時が翌月以降のリスケのみ表示
+        filtered = tableBaseData.filter(a =>
+            a.status === 'リスケ' &&
+            a.acquisition_date && a.acquisition_date >= ymStart && a.acquisition_date <= ymEnd &&
+            a.scheduled_date && a.scheduled_date >= nextStart
+        );
+    } else {
+        filtered = tableBaseData.filter(a => a.status === currentAppoFilter);
+    }
 
     // メンバーフィルタ
     const selectedMember = appoMemberFilter ? appoMemberFilter.value : 'all';
@@ -3975,14 +4003,17 @@ function renderAppointments() {
                 <td>${displayName(a.member_name)}</td>
                 <td>${a.project_name}</td>
                 <td>${a.customer_name || '-'}</td>
-                <td>${formatDateDisplay(a.scheduled_date)}</td>
+                <td>
+                    ${formatDateDisplay(a.scheduled_date)}
+                    ${a.status === 'リスケ' && a.reschedule_date ? `<div style="font-size:0.7rem;color:#8a7a00;margin-top:2px;">→ ${formatDateDisplay(a.reschedule_date)}</div>` : ''}
+                </td>
                 <td class="text-right number">¥${(a.amount || 0).toLocaleString()}</td>
                 <td><span class="status-badge ${statusClass}">${a.status}</span></td>
                 <td>
                     <div style="display:flex;gap:4px;align-items:center;">
                         ${a.status === '未確認' ? `
                             <button class="status-btn btn-execute" onclick="updateAppoStatus('${a.id}','実施')">実施</button>
-                            <button class="status-btn btn-reschedule" onclick="updateAppoStatus('${a.id}','リスケ')">リスケ</button>
+                            <button class="status-btn btn-reschedule" onclick="openRescheduleModal('${a.id}')">リスケ</button>
                             <button class="status-btn btn-cancel" onclick="updateAppoStatus('${a.id}','キャンセル')">キャンセル</button>
                         ` : `
                             <button class="status-btn" onclick="updateAppoStatus('${a.id}','未確認')">戻す</button>
@@ -4062,14 +4093,52 @@ async function deleteAppointment(id) {
     }
 }
 
-async function updateAppoStatus(id, newStatus) {
-    console.log('updateAppoStatus called:', id, newStatus);
+// ==================== リスケモーダル ====================
+function openRescheduleModal(id) {
+    const appo = (executionAppoData || []).find(a => a.id === id)
+              || (appointmentsData || []).find(a => a.id === id);
+    if (!appo) { alert('対象アポが見つかりません'); return; }
+
+    document.getElementById('rescheduleAppoId').value = id;
+    document.getElementById('rescheduleCustomer').textContent = appo.customer_name || '-';
+    document.getElementById('rescheduleOriginalDate').textContent = formatDateDisplay(appo.scheduled_date) || '-';
+
+    // 既に reschedule_date がある場合は初期値として表示（編集用途）
+    document.getElementById('rescheduleNewDate').value = appo.reschedule_date || '';
+    document.getElementById('rescheduleMemo').value = appo.memo || '';
+
+    document.getElementById('rescheduleModal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('rescheduleNewDate').focus(), 50);
+}
+
+function closeRescheduleModal() {
+    document.getElementById('rescheduleModal').classList.add('hidden');
+}
+
+function submitRescheduleModal() {
+    const id = document.getElementById('rescheduleAppoId').value;
+    const newDate = document.getElementById('rescheduleNewDate').value;
+    const memo = document.getElementById('rescheduleMemo').value.trim();
+    if (!id || !newDate) { alert('新しい実施予定日を入力してください'); return; }
+    closeRescheduleModal();
+    updateAppoStatus(id, 'リスケ', newDate, memo || null);
+}
+
+async function updateAppoStatus(id, newStatus, rescheduleDate = null, memo = null) {
+    console.log('updateAppoStatus called:', id, newStatus, rescheduleDate, memo);
     try {
         const now = formatDate(new Date());
         if (newStatus === '未確認') {
+            // 戻す: reschedule_date はクリア、memo はユーザー判断で保持
             await executeTurso(
-                "UPDATE appointments SET status = ?, confirmation_date = NULL, confirmed_by = NULL, updated_at = datetime('now') WHERE id = ?",
+                "UPDATE appointments SET status = ?, confirmation_date = NULL, confirmed_by = NULL, reschedule_date = NULL, updated_at = datetime('now') WHERE id = ?",
                 [newStatus, id]
+            );
+        } else if (newStatus === 'リスケ') {
+            // memo は渡された場合のみ更新（既存メモを上書きしないよう COALESCE）
+            await executeTurso(
+                "UPDATE appointments SET status = ?, confirmation_date = ?, confirmed_by = 'dashboard', reschedule_date = ?, memo = COALESCE(?, memo), updated_at = datetime('now') WHERE id = ?",
+                [newStatus, now, rescheduleDate, memo, id]
             );
         } else {
             await executeTurso(
@@ -4085,11 +4154,16 @@ async function updateAppoStatus(id, newStatus) {
             if (appo) {
                 appo.status = newStatus;
                 appo.confirmation_date = newStatus !== '未確認' ? now : null;
+                if (newStatus === 'リスケ') {
+                    appo.reschedule_date = rescheduleDate;
+                    if (memo !== null) appo.memo = memo;
+                } else if (newStatus === '未確認') {
+                    appo.reschedule_date = null;
+                }
             }
         });
         console.log('Local data updated');
 
-        const filter = getFilters();
         renderAppointments();
         console.log('renderAppointments done');
     } catch (error) {
@@ -6556,6 +6630,13 @@ function getEndOfMonth(ym) {
 
 function sum(arr, key) {
     return arr.reduce((s, d) => s + (parseFloat(d[key]) || 0), 0);
+}
+
+// 翌月 ym（YYYY-MM 形式）
+function getNextYM(ym) {
+    const [y, m] = ym.split('-').map(Number);
+    if (m === 12) return `${y + 1}-01`;
+    return `${y}-${String(m + 1).padStart(2, '0')}`;
 }
 
 // 前月 ym（YYYY-MM 形式）

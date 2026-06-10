@@ -737,3 +737,132 @@ function diagnoseTursoSync() {
 
   Logger.log('=== Turso同期 診断完了 ===');
 }
+
+// ==================== 売下報告rawdata 同期 ====================
+/**
+ * 売下報告rawdata シートを Turso に同期。
+ * カラム構成:
+ *   A: 取得者(メール), B: 売上種別, C: 案件名, D: 会社名,
+ *   E: 毀損日, F: 実施日時(新), G: 金額, H: 売下区分(リスケ/キャンセル/却下), I: 売下理由
+ *
+ * 既存 appointments の (member_name, project_name, customer_name) と一致する行を見つけ、
+ *   - status を 売下区分(リスケ/キャンセル) に更新 (却下は status を変更しない)
+ *   - status='リスケ' のとき reschedule_date を F列 で上書き
+ *   - memo に 売下理由 を append
+ *   - confirmation_date を 毀損日 で記録
+ *
+ * 同キーが複数件ある場合:
+ *   - 毀損日より前の最新 scheduled_date を持つ行に紐付ける
+ */
+function syncSouageHoukokuToTurso() {
+  Logger.log('=== 売下報告rawdata 同期開始 ===');
+
+  const sheet = SpreadsheetApp.openById(SEIKA_CONFIG.SPREADSHEET_ID)
+    .getSheetByName(SEIKA_CONFIG.SOUAGE_SHEET);
+  if (!sheet) {
+    Logger.log('ERROR: Sheet not found: ' + SEIKA_CONFIG.SOUAGE_SHEET);
+    return;
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('対象行なし'); return; }
+
+  const allData = sheet.getRange(2, 1, lastRow - 1, 9).getValues();
+
+  // 同期対象: 毀損日が SYNC_DAYS 以内の行
+  const today = new Date();
+  const syncFrom = new Date(today);
+  syncFrom.setDate(syncFrom.getDate() - SEIKA_CONFIG.SYNC_DAYS);
+  const syncFromStr = formatDateGAS(syncFrom);
+
+  // 行を正規化・対象絞り込み
+  const targets = [];
+  for (const row of allData) {
+    const emailOrName = String(row[0] || '').trim();
+    if (!emailOrName) continue;
+    const memberName = normalizeMemberName(emailOrName);
+    if (!memberName) continue;
+
+    const projectName = normalizeProjectName(row[2]);
+    const customerName = String(row[3] || '').trim();
+    const damageDateRaw = row[4]; // E: 毀損日
+    const newScheduledRaw = row[5]; // F: 実施日時(新)
+    const amount = parseInt(row[6]) || 0;
+    const category = String(row[7] || '').trim(); // H: 売下区分
+    const reason = String(row[8] || '').trim();   // I: 売下理由
+
+    if (!projectName || !customerName) continue;
+    if (!damageDateRaw) continue;
+
+    const damageDate = formatDateGAS(damageDateRaw);
+    if (!damageDate || damageDate < syncFromStr) continue;
+
+    // リスケ/キャンセル のみ扱う (却下は status を変更しない方針)
+    if (category !== 'リスケ' && category !== 'キャンセル') continue;
+
+    const newScheduled = newScheduledRaw ? formatDateGAS(newScheduledRaw) : null;
+
+    targets.push({
+      memberName: memberName,
+      projectName: projectName,
+      customerName: customerName,
+      damageDate: damageDate,
+      newScheduled: newScheduled,
+      amount: amount,
+      category: category,
+      reason: reason
+    });
+  }
+
+  Logger.log('売下報告 同期対象: ' + targets.length + '行');
+  if (targets.length === 0) return;
+
+  // 同キーが複数ある場合の解決のため、まず該当 appointments を一括取得
+  // 大量にならないよう (member, project, customer) ごとに 1 件ずつ問い合わせる
+  let updated = 0, skipped = 0, errors = 0;
+
+  for (const t of targets) {
+    try {
+      const rows = queryTurso(
+        "SELECT id, scheduled_date, status, confirmation_date FROM appointments " +
+        "WHERE member_name = ? AND project_name = ? AND customer_name = ? AND (deleted_at IS NULL) " +
+        "ORDER BY scheduled_date DESC",
+        [t.memberName, t.projectName, t.customerName]
+      );
+      if (!rows || rows.length === 0) { skipped++; continue; }
+
+      // 候補が複数あれば「毀損日以前で最新の scheduled_date」を選ぶ
+      let target = null;
+      for (const r of rows) {
+        if (r.scheduled_date && r.scheduled_date <= t.damageDate) { target = r; break; }
+      }
+      if (!target) target = rows[0]; // 全部 damageDate より後なら最新を選ぶ
+
+      // UPDATE 文を組み立て
+      let sql, args;
+      if (t.category === 'リスケ') {
+        sql = "UPDATE appointments SET status = 'リスケ', confirmation_date = ?, " +
+              "confirmed_by = COALESCE(confirmed_by, 'souage_sync'), reschedule_date = ?, " +
+              "memo = CASE WHEN memo IS NULL OR memo = '' THEN ? ELSE memo || ' / ' || ? END, " +
+              "updated_at = datetime('now') WHERE id = ?";
+        const memoLine = t.reason ? ('リスケ理由: ' + t.reason) : 'リスケ(売下シート反映)';
+        args = [t.damageDate, t.newScheduled, memoLine, memoLine, target.id];
+      } else { // キャンセル
+        sql = "UPDATE appointments SET status = 'キャンセル', confirmation_date = ?, " +
+              "confirmed_by = COALESCE(confirmed_by, 'souage_sync'), " +
+              "memo = CASE WHEN memo IS NULL OR memo = '' THEN ? ELSE memo || ' / ' || ? END, " +
+              "updated_at = datetime('now') WHERE id = ?";
+        const memoLine = t.reason ? ('キャンセル理由: ' + t.reason) : 'キャンセル(売下シート反映)';
+        args = [t.damageDate, memoLine, memoLine, target.id];
+      }
+
+      executeTursoQuery(sql, args);
+      updated++;
+    } catch (e) {
+      Logger.log('行更新エラー (' + t.memberName + '/' + t.projectName + '/' + t.customerName + '): ' + e.message);
+      errors++;
+    }
+  }
+
+  Logger.log('売下報告同期完了: 更新' + updated + '件 / 該当なし' + skipped + '件 / エラー' + errors + '件');
+}
