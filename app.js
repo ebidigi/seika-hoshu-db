@@ -704,6 +704,7 @@ async function loadMonthData() {
     const ym = document.getElementById('filterMonth').value;
     const startDate = ym + '-01';
     const endDate = getEndOfMonth(ym);
+    const nextMonthStart = getNextYM(ym) + '-01';
 
     console.log('Loading month data:', ym, startDate, '~', endDate);
 
@@ -724,10 +725,10 @@ async function loadMonthData() {
             "SELECT * FROM project_member_assignments WHERE year_month = ? ORDER BY rank, project_name, member_name",
             [ym]
         ),
-        // 当月実施予定アポ(前月以前取得含む) + 当月取得アポ(翌月以降実施のリスケ対象含む)
+        // 当月実施予定アポ(前月以前取得含む) + 当月取得かつ翌月以降実施(リスケ対象)
         queryTurso(
-            "SELECT * FROM appointments WHERE (scheduled_date >= ? AND scheduled_date <= ?) OR (acquisition_date >= ? AND acquisition_date <= ?) ORDER BY scheduled_date",
-            [startDate, endDate, startDate, endDate]
+            "SELECT * FROM appointments WHERE (scheduled_date >= ? AND scheduled_date <= ?) OR (acquisition_date >= ? AND acquisition_date <= ? AND scheduled_date >= ?) ORDER BY scheduled_date",
+            [startDate, endDate, startDate, endDate, nextMonthStart]
         ),
         // 予定報告データ
         queryTurso(
@@ -1765,7 +1766,11 @@ function filterByMrnPeriod(perfData, appoData, execData, ym) {
             exec: execData.filter(function(d) { return d.scheduled_date >= customRange.start && d.scheduled_date <= customRange.end; })
         };
     }
-    if (mrnPeriod === 'month') return { perf: perfData, appo: appoData, exec: execData };
+    if (mrnPeriod === 'month') {
+        var mStart = ym + '-01';
+        var mEnd = getEndOfMonth(ym);
+        return { perf: perfData, appo: appoData, exec: execData.filter(function(d) { return d.scheduled_date && d.scheduled_date >= mStart && d.scheduled_date <= mEnd; }) };
+    }
     var today = new Date();
     var startDate, endDate;
     if (mrnPeriod === 'day') {
@@ -2130,7 +2135,15 @@ async function loadQuarterDataAndRender() {
 
 // 期間に応じたデータフィルタ
 function filterByMgmtPeriod(perfData, appoData, execAppoData, ym) {
-    if (mgmtPeriod === 'month') return { perf: perfData, appo: appoData, exec: execAppoData };
+    if (mgmtPeriod === 'month') {
+        const mStart = ym + '-01';
+        const mEnd = getEndOfMonth(ym);
+        return {
+            perf: perfData,
+            appo: appoData,
+            exec: execAppoData.filter(d => d.scheduled_date && d.scheduled_date >= mStart && d.scheduled_date <= mEnd)
+        };
+    }
 
     if (mgmtPeriod === 'quarter' && window._mgmtQuarterData) {
         return { perf: window._mgmtQuarterData.perf, appo: window._mgmtQuarterData.appo, exec: window._mgmtQuarterData.exec };
@@ -2851,11 +2864,12 @@ function renderManagement(filter) {
     // アポ確認タブ renderAppointments() と同一の母集合: executionAppoData (scheduled_date 当月)
     //   + active案件 + 除外メンバー除外。 status は 実施/リスケ/キャンセル/未確認 の4種合算。
     const activeProjectNamesForCard = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
-    const VALID_APPO_STATUSES = ['実施', 'リスケ', 'キャンセル', '未確認'];
+    const ymStartCard = ym + '-01';
+    const ymEndCard = getEndOfMonth(ym);
     const totalAcqActualCard = (executionAppoData || [])
         .filter(a => !excluded.includes(a.member_name))
         .filter(a => activeProjectNamesForCard.has(a.project_name))
-        .filter(a => VALID_APPO_STATUSES.includes(a.status))
+        .filter(a => a.scheduled_date && a.scheduled_date >= ymStartCard && a.scheduled_date <= ymEndCard)
         .reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
     // 当月着地 専用目標 (取得目標とは別管理)
     const landingTarget = totalTarget && totalTarget.landing_amount_target
