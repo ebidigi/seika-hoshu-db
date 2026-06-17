@@ -594,7 +594,7 @@ async function ensureMembers() {
     }
     // inactiveになっている対象メンバーをactiveに復帰
     await queryTurso(
-        "UPDATE members SET status = 'active' WHERE member_name IN ('田中か', '村松', '美除') AND status != 'active'"
+        "UPDATE members SET status = 'active' WHERE member_name IN ('田中か', '村松', '美除', '三善', '小甲') AND status != 'active'"
     );
 }
 
@@ -1482,7 +1482,8 @@ function renderMorning(filter) {
         .filter(name => {
             const t = memberTeamMap[name];
             return t && t !== '未所属' && t !== '所属なし';
-        });
+        })
+        .filter(name => membersData.some(m => m.member_name === name && m.status === 'active'));
 
     const memberPickerRange = getMrnEffectiveRange(ym);
     const memberRows = memberNames.map(memberName => {
@@ -2593,8 +2594,8 @@ function renderManagement(filter) {
     const execConfirmed = allExecAppo.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
     const execUnconfirmed = allExecAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
 
-    // 当月取得ゲージは 人別詳細テーブル と同じ条件(固定12名 + active案件)で集計
-    const PERSON_DETAIL_MEMBERS_SET = new Set(['松居','山本','坪井','中村た','野上','堀切','越後','松坂','清水','宮城','轟','浦上']);
+    // 当月取得ゲージは 人別詳細テーブル と同じ条件(activeメンバー + active案件)で集計
+    const PERSON_DETAIL_MEMBERS_SET = new Set(membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name)).map(m => m.member_name));
     const activeProjectNamesForGauge = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
     const gaugeAcqAmount = allAppo
         .filter(a => PERSON_DETAIL_MEMBERS_SET.has(a.member_name) && activeProjectNamesForGauge.has(a.project_name))
@@ -2765,8 +2766,8 @@ function renderManagement(filter) {
     </tr></tfoot></table></div>`;
 
     // ========== 人別 詳細データ準備（案件別と同じ列構成、アポ単価のみ除外） ==========
-    // 表示メンバー: 固定12名（成果報酬チーム）
-    const PERSON_DETAIL_MEMBERS = ['松居','山本','坪井','中村た','野上','堀切','越後','松坂','清水','宮城','轟','浦上'];
+    // 表示メンバー: 設定タブでactiveにしたメンバーのみ
+    const PERSON_DETAIL_MEMBERS = activeMembers.map(m => m.member_name);
     const activeProjectNamesPerMember = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
 
     const memberDetailData = PERSON_DETAIL_MEMBERS.map(memberName => {
@@ -2993,7 +2994,7 @@ function renderManagement(filter) {
     renderHistoricalProjectStatus();
 
     // ========== チャート描画 ==========
-    // 当月取得ゲージのbreakdown も 固定12名 + active案件 で算出（合計が表と一致するため）
+    // 当月取得ゲージのbreakdown も activeメンバー + active案件 で算出（合計が表と一致するため）
     const acqBreakdown = memberDetailData
         .filter(d => d.acqAmount > 0)
         .map(d => ({ name: d.name, value: d.acqAmount }));
