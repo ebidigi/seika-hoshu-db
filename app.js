@@ -5377,8 +5377,10 @@ function renderSettings() {
         return html;
     }
 
-    document.getElementById('acqTargetSettingsGrid').innerHTML = buildTargetSection('acq');
-    document.getElementById('execTargetSettingsGrid').innerHTML = buildTargetSection('exec');
+    const acqGrid = document.getElementById('acqTargetSettingsGrid');
+    if (acqGrid) acqGrid.innerHTML = buildTargetSection('acq');
+    const execGrid = document.getElementById('execTargetSettingsGrid');
+    if (execGrid) execGrid.innerHTML = buildTargetSection('exec');
 
     recalcTargetTotals();
 
