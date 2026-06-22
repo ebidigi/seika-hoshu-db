@@ -1394,8 +1394,11 @@ function renderMorning(filter) {
         ym
     );
     const allPerf = periodData.perf;
-    const allAppo = periodData.appo;
-    const allExecAppo = periodData.exec;
+    // 全集計の基準: activeメンバー + active案件
+    const _activeMbrSet = new Set(membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name)).map(m => m.member_name));
+    const _activePrjSet = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
+    const allAppo = periodData.appo.filter(a => _activeMbrSet.has(a.member_name) && _activePrjSet.has(a.project_name));
+    const allExecAppo = periodData.exec.filter(a => _activeMbrSet.has(a.member_name) && _activePrjSet.has(a.project_name));
 
     const acquisitionAmount = allAppo.reduce((s, a) => s + (a.amount || 0), 0);
     const execConfirmed = allExecAppo.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
@@ -2587,19 +2590,17 @@ function renderManagement(filter) {
         ym
     );
     const allPerf = periodData.perf;
-    const allAppo = periodData.appo;
-    const allExecAppo = periodData.exec;
+    // 全集計の基準: activeメンバー + active案件
+    const PERSON_DETAIL_MEMBERS_SET = new Set(membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name)).map(m => m.member_name));
+    const activeProjectNamesForGauge = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
+    const allAppo = periodData.appo.filter(a => PERSON_DETAIL_MEMBERS_SET.has(a.member_name) && activeProjectNamesForGauge.has(a.project_name));
+    const allExecAppo = periodData.exec.filter(a => PERSON_DETAIL_MEMBERS_SET.has(a.member_name) && activeProjectNamesForGauge.has(a.project_name));
 
     const acquisitionAmount = allAppo.reduce((s, a) => s + (a.amount || 0), 0);
     const execConfirmed = allExecAppo.filter(a => a.status === '実施').reduce((s, a) => s + (a.amount || 0), 0);
     const execUnconfirmed = allExecAppo.filter(a => a.status === '未確認').reduce((s, a) => s + (a.amount || 0), 0);
 
-    // 当月取得ゲージは 人別詳細テーブル と同じ条件(activeメンバー + active案件)で集計
-    const PERSON_DETAIL_MEMBERS_SET = new Set(membersData.filter(m => m.status === 'active' && !excluded.includes(m.member_name)).map(m => m.member_name));
-    const activeProjectNamesForGauge = new Set(projectsData.filter(p => p.status === 'active').map(p => p.project_name));
-    const gaugeAcqAmount = allAppo
-        .filter(a => PERSON_DETAIL_MEMBERS_SET.has(a.member_name) && activeProjectNamesForGauge.has(a.project_name))
-        .reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const gaugeAcqAmount = acquisitionAmount;
 
     const { elapsed, total: totalDays } = getBusinessDays(ym);
     const standardProgress = totalDays > 0 ? Math.round(elapsed / totalDays * 1000) / 10 : 0;
@@ -2686,7 +2687,7 @@ function renderManagement(filter) {
         const unitPrice = proj.unit_price || 0;
         const acquiredCount = projAppo.length;
         const execCount = projExec.length;
-        const acqAmount = unitPrice * acquiredCount;
+        const acqAmount = projAppo.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
         const cancelCount = projExec.filter(a => a.status === 'キャンセル').length;
         const cancelRate = execCount > 0 ? Math.round(cancelCount / execCount * 100) : 0;
         const callToAppo = callCount > 0 ? (appoCountPerf / callCount * 100).toFixed(1) : '-';
