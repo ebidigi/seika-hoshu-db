@@ -3892,14 +3892,14 @@ function renderAppointments() {
     }
 
     // ステータスサマリ
-    const total = summaryData.length;
+    // 総アポ数 = 各カードの合計（実施 + 翌月以降リスケ + キャンセル + 未確認）
+    const total = statusCounts['実施'] + rescheduleNextCount + statusCounts['キャンセル'] + statusCounts['未確認'];
     const executeRate = total > 0 ? (statusCounts['実施'] / total * 100).toFixed(1) : '0';
     const cancelRate = total > 0 ? (statusCounts['キャンセル'] / total * 100).toFixed(1) : '0';
-    // リスケ率の分子は「翌月リスケ」のみ。分母はモ集団 (total)
     const rescheduleRate = total > 0 ? (rescheduleNextCount / total * 100).toFixed(1) : '0';
     const unconfirmedRate = total > 0 ? (statusCounts['未確認'] / total * 100).toFixed(1) : '0';
 
-    const totalAmount = statusAmounts['実施'] + statusAmounts['リスケ'] + statusAmounts['キャンセル'] + statusAmounts['未確認'];
+    const totalAmount = statusAmounts['実施'] + rescheduleNextAmount + statusAmounts['キャンセル'] + statusAmounts['未確認'];
     // 各カードクリックでステータス絞り込み（XSSなし: ハードコードされた静的属性のみ）
     const _act = (s) => currentAppoFilter === s ? ' rate-card-active' : '';
     document.getElementById('appo-status-summary').innerHTML = `
