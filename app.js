@@ -3866,18 +3866,19 @@ function renderAppointments() {
     const nextStart = nextYM + '-01';
     let rescheduleNextCount = 0, rescheduleNextAmount = 0;
     summaryData.forEach(a => {
-        if (statusCounts[a.status] !== undefined) {
-            statusCounts[a.status]++;
-            statusAmounts[a.status] += a.amount || 0;
-        }
         if (a.status === 'リスケ') {
-            // 取得日が当月 & 実施日時が翌月以降 = 当月取得アポが翌月以降にリスケされたもの
-            const acqInMonth = a.acquisition_date && a.acquisition_date >= ymStart && a.acquisition_date <= ymEnd;
-            const schNextOrLater = a.scheduled_date && a.scheduled_date >= nextStart;
-            if (acqInMonth && schNextOrLater) {
+            // reschedule_date が翌月以降 → リスケカード
+            // reschedule_date が当月内 or NULL → 未確認扱い
+            if (a.reschedule_date && a.reschedule_date >= nextStart) {
                 rescheduleNextCount++;
                 rescheduleNextAmount += a.amount || 0;
+            } else {
+                statusCounts['未確認']++;
+                statusAmounts['未確認'] += a.amount || 0;
             }
+        } else if (statusCounts[a.status] !== undefined) {
+            statusCounts[a.status]++;
+            statusAmounts[a.status] += a.amount || 0;
         }
     });
 
@@ -3977,11 +3978,16 @@ function renderAppointments() {
     if (currentAppoFilter === 'all') {
         filtered = tableBaseData;
     } else if (currentAppoFilter === 'リスケ') {
-        // 取得日が当月 & 実施日時が翌月以降のリスケのみ表示
+        // reschedule_date が翌月以降のリスケのみ表示
         filtered = tableBaseData.filter(a =>
             a.status === 'リスケ' &&
-            a.acquisition_date && a.acquisition_date >= ymStart && a.acquisition_date <= ymEnd &&
-            a.scheduled_date && a.scheduled_date >= nextStart
+            a.reschedule_date && a.reschedule_date >= nextStart
+        );
+    } else if (currentAppoFilter === '未確認') {
+        // 未確認 + 当月内リスケ or reschedule_date NULL のリスケを表示
+        filtered = tableBaseData.filter(a =>
+            a.status === '未確認' ||
+            (a.status === 'リスケ' && !(a.reschedule_date && a.reschedule_date >= nextStart))
         );
     } else {
         filtered = tableBaseData.filter(a => a.status === currentAppoFilter);
