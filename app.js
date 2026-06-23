@@ -3832,8 +3832,14 @@ function renderAppointments() {
         .filter(a => activeProjectsForAppo.has(a.project_name))
         .filter(a => !acqFrom || (a.acquisition_date && a.acquisition_date >= acqFrom))
         .filter(a => !acqTo   || (a.acquisition_date && a.acquisition_date <= acqTo))
-        .filter(a => !schFrom || (effectiveDate(a) >= schFrom))
-        .filter(a => !schTo   || (effectiveDate(a) <= schTo));
+        .filter(a => {
+            // scheduled_date が当月内 OR effectiveDate（reschedule_date）が当月内、どちらかで表示
+            const eff = effectiveDate(a);
+            const sch = a.scheduled_date || '';
+            const inRangeBySch = (!schFrom || sch >= schFrom) && (!schTo || sch <= schTo);
+            const inRangeByEff = (!schFrom || eff >= schFrom) && (!schTo || eff <= schTo);
+            return inRangeBySch || inRangeByEff;
+        });
     // ソート
     merged.sort((a, b) => {
         let va = a[appoSortKey] || '';
@@ -3986,8 +3992,7 @@ function renderAppointments() {
     if (currentAppoFilter === 'all') {
         filtered = tableBaseData;
     } else if (currentAppoFilter === 'リスケ') {
-        // effectiveDateフィルタ後は翌月以降リスケは当月に属さないため常に空
-        // 翌月以降リスケは翌月のアポ確認タブで表示・操作可能
+        // reschedule_date が翌月以降のリスケのみ表示
         filtered = tableBaseData.filter(a =>
             a.status === 'リスケ' &&
             a.reschedule_date && a.reschedule_date >= nextStart
