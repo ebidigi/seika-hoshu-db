@@ -485,7 +485,9 @@ function computeTeamStats(teamName, ym) {
     const perf = performanceData.filter(d => members.includes(d.member_name));
     const appo = appointmentsData.filter(d => members.includes(d.member_name));
     const execAppoRaw = executionAppoData.filter(d => members.includes(d.member_name));
-    const execAppo = adjustExecAppoForTeam(execAppoRaw, teamName, ym);
+    // effectiveDateで当月に属するアポのみに絞り、翌月リスケの二重計上を防ぐ
+    const execAppo = adjustExecAppoForTeam(execAppoRaw, teamName, ym)
+        .filter(d => effectiveDate(d).startsWith(ym));
     const asg = assignmentsData.filter(d => members.includes(d.member_name));
 
     const callCount = sum(perf, 'call_count');
@@ -544,7 +546,7 @@ function computeMemberStats(memberName, ym, range) {
     if (range) {
         perf = perf.filter(d => d.input_date >= range.start && d.input_date <= range.end);
         appo = appo.filter(d => d.acquisition_date >= range.start && d.acquisition_date <= range.end);
-        execAppo = execAppo.filter(d => d.scheduled_date >= range.start && d.scheduled_date <= range.end);
+        execAppo = execAppo.filter(d => effectiveDate(d) >= range.start && effectiveDate(d) <= range.end);
     }
 
     const callCount = sum(perf, 'call_count');
@@ -725,10 +727,10 @@ async function loadMonthData() {
             "SELECT * FROM project_member_assignments WHERE year_month = ? ORDER BY rank, project_name, member_name",
             [ym]
         ),
-        // 当月実施予定アポ(前月以前取得含む) + 当月取得かつ翌月以降実施(リスケ対象)
+        // 当月実施予定アポ(前月以前取得含む) + 当月取得かつ翌月以降実施(リスケ対象) + リスケ先が当月のアポ
         queryTurso(
-            "SELECT * FROM appointments WHERE (scheduled_date >= ? AND scheduled_date <= ?) OR (acquisition_date >= ? AND acquisition_date <= ? AND scheduled_date >= ?) ORDER BY scheduled_date",
-            [startDate, endDate, startDate, endDate, nextMonthStart]
+            "SELECT * FROM appointments WHERE (scheduled_date >= ? AND scheduled_date <= ?) OR (acquisition_date >= ? AND acquisition_date <= ? AND scheduled_date >= ?) OR (reschedule_date >= ? AND reschedule_date <= ?) ORDER BY scheduled_date",
+            [startDate, endDate, startDate, endDate, nextMonthStart, startDate, endDate]
         ),
         // 予定報告データ
         queryTurso(
@@ -1767,13 +1769,13 @@ function filterByMrnPeriod(perfData, appoData, execData, ym) {
         return {
             perf: perfData.filter(function(d) { return d.input_date >= customRange.start && d.input_date <= customRange.end; }),
             appo: appoData.filter(function(d) { return d.acquisition_date >= customRange.start && d.acquisition_date <= customRange.end; }),
-            exec: execData.filter(function(d) { return d.scheduled_date >= customRange.start && d.scheduled_date <= customRange.end; })
+            exec: execData.filter(function(d) { return effectiveDate(d) >= customRange.start && effectiveDate(d) <= customRange.end; })
         };
     }
     if (mrnPeriod === 'month') {
         var mStart = ym + '-01';
         var mEnd = getEndOfMonth(ym);
-        return { perf: perfData, appo: appoData, exec: execData.filter(function(d) { return d.scheduled_date && d.scheduled_date >= mStart && d.scheduled_date <= mEnd; }) };
+        return { perf: perfData, appo: appoData, exec: execData.filter(function(d) { return effectiveDate(d) >= mStart && effectiveDate(d) <= mEnd; }) };
     }
     var today = new Date();
     var startDate, endDate;
@@ -1791,7 +1793,7 @@ function filterByMrnPeriod(perfData, appoData, execData, ym) {
     return {
         perf: perfData.filter(function(d) { return d.input_date >= startDate && d.input_date <= endDate; }),
         appo: appoData.filter(function(d) { return d.acquisition_date >= startDate && d.acquisition_date <= endDate; }),
-        exec: execData.filter(function(d) { return d.scheduled_date >= startDate && d.scheduled_date <= endDate; })
+        exec: execData.filter(function(d) { return effectiveDate(d) >= startDate && effectiveDate(d) <= endDate; })
     };
 }
 
@@ -2145,7 +2147,7 @@ function filterByMgmtPeriod(perfData, appoData, execAppoData, ym) {
         return {
             perf: perfData,
             appo: appoData,
-            exec: execAppoData.filter(d => d.scheduled_date && d.scheduled_date >= mStart && d.scheduled_date <= mEnd)
+            exec: execAppoData.filter(d => effectiveDate(d) >= mStart && effectiveDate(d) <= mEnd)
         };
     }
 
@@ -2169,7 +2171,7 @@ function filterByMgmtPeriod(perfData, appoData, execAppoData, ym) {
     return {
         perf: perfData.filter(d => d.input_date >= startDate && d.input_date <= endDate),
         appo: appoData.filter(d => d.acquisition_date >= startDate && d.acquisition_date <= endDate),
-        exec: execAppoData.filter(d => d.scheduled_date >= startDate && d.scheduled_date <= endDate)
+        exec: execAppoData.filter(d => effectiveDate(d) >= startDate && effectiveDate(d) <= endDate)
     };
 }
 // 期間に応じた目標金額を算出
@@ -3830,8 +3832,8 @@ function renderAppointments() {
         .filter(a => activeProjectsForAppo.has(a.project_name))
         .filter(a => !acqFrom || (a.acquisition_date && a.acquisition_date >= acqFrom))
         .filter(a => !acqTo   || (a.acquisition_date && a.acquisition_date <= acqTo))
-        .filter(a => !schFrom || (a.scheduled_date && a.scheduled_date >= schFrom))
-        .filter(a => !schTo   || (a.scheduled_date && a.scheduled_date <= schTo));
+        .filter(a => !schFrom || (effectiveDate(a) >= schFrom))
+        .filter(a => !schTo   || (effectiveDate(a) <= schTo));
     // ソート
     merged.sort((a, b) => {
         let va = a[appoSortKey] || '';
@@ -3855,7 +3857,10 @@ function renderAppointments() {
     let tableBaseData = allData;
     if (!appoShowAll && currentAppoFilter === '未確認') {
         const today = formatDate(new Date());
-        tableBaseData = tableBaseData.filter(a => !a.scheduled_date || a.scheduled_date <= today);
+        tableBaseData = tableBaseData.filter(a => {
+            const eff = effectiveDate(a);
+            return !eff || eff <= today;
+        });
     }
 
     const statusCounts = { '未確認': 0, '実施': 0, 'リスケ': 0, 'キャンセル': 0 };
@@ -3882,9 +3887,12 @@ function renderAppointments() {
         }
     });
 
-    // 未確認バッジ（今日までの件数）
+    // 未確認バッジ（今日までの件数）: 未確認 + 当月リスケ（操作待ち）を含む
     const badge = document.getElementById('unconfirmedBadge');
-    const badgeUnconfirmedCount = tableBaseData.filter(a => a.status === '未確認').length;
+    const badgeUnconfirmedCount = tableBaseData.filter(a =>
+        a.status === '未確認' ||
+        (a.status === 'リスケ' && a.reschedule_date && a.reschedule_date >= ymStart && a.reschedule_date <= ymEnd)
+    ).length;
     if (badgeUnconfirmedCount > 0) {
         badge.textContent = badgeUnconfirmedCount;
         badge.style.display = 'flex';
@@ -3978,16 +3986,17 @@ function renderAppointments() {
     if (currentAppoFilter === 'all') {
         filtered = tableBaseData;
     } else if (currentAppoFilter === 'リスケ') {
-        // reschedule_date が翌月以降のリスケのみ表示
+        // effectiveDateフィルタ後は翌月以降リスケは当月に属さないため常に空
+        // 翌月以降リスケは翌月のアポ確認タブで表示・操作可能
         filtered = tableBaseData.filter(a =>
             a.status === 'リスケ' &&
             a.reschedule_date && a.reschedule_date >= nextStart
         );
     } else if (currentAppoFilter === '未確認') {
-        // 未確認 + 当月内リスケ or reschedule_date NULL のリスケを表示
+        // 未確認 + 当月リスケ（reschedule_date が当月内）を操作待ちとして表示
         filtered = tableBaseData.filter(a =>
             a.status === '未確認' ||
-            (a.status === 'リスケ' && !(a.reschedule_date && a.reschedule_date >= nextStart))
+            (a.status === 'リスケ' && a.reschedule_date && a.reschedule_date >= ymStart && a.reschedule_date <= ymEnd)
         );
     } else {
         filtered = tableBaseData.filter(a => a.status === currentAppoFilter);
@@ -4016,9 +4025,13 @@ function renderAppointments() {
 
     const tbody = document.getElementById('appoTableBody');
     tbody.innerHTML = filtered.map(a => {
-        const statusClass = a.status === '未確認' ? 'status-unconfirmed' :
-                           a.status === '実施' ? 'status-executed' :
-                           a.status === 'リスケ' ? 'status-rescheduled' : 'status-cancelled';
+        // 当月リスケ: reschedule_date が当月内のリスケ → 操作待ち扱い
+        const isCurrentMonthReschedule = a.status === 'リスケ' && a.reschedule_date &&
+            a.reschedule_date >= ymStart && a.reschedule_date <= ymEnd;
+        const displayStatus = isCurrentMonthReschedule ? '未確認' : a.status;
+        const statusClass = displayStatus === '未確認' ? 'status-unconfirmed' :
+                           displayStatus === '実施' ? 'status-executed' :
+                           displayStatus === 'リスケ' ? 'status-rescheduled' : 'status-cancelled';
         return `
             <tr>
                 <td>${formatDateDisplay(a.acquisition_date)}</td>
@@ -4030,10 +4043,10 @@ function renderAppointments() {
                     ${a.status === 'リスケ' && a.reschedule_date ? `<div style="font-size:0.7rem;color:#8a7a00;margin-top:2px;">→ ${formatDateDisplay(a.reschedule_date)}</div>` : ''}
                 </td>
                 <td class="text-right number">¥${(a.amount || 0).toLocaleString()}</td>
-                <td><span class="status-badge ${statusClass}">${a.status}</span></td>
+                <td><span class="status-badge ${statusClass}">${displayStatus}</span></td>
                 <td>
                     <div style="display:flex;gap:4px;align-items:center;">
-                        ${a.status === '未確認' ? `
+                        ${(a.status === '未確認' || isCurrentMonthReschedule) ? `
                             <button class="status-btn btn-execute" onclick="updateAppoStatus('${a.id}','実施')">実施</button>
                             <button class="status-btn btn-reschedule" onclick="openRescheduleModal('${a.id}')">リスケ</button>
                             <button class="status-btn btn-cancel" onclick="updateAppoStatus('${a.id}','キャンセル')">キャンセル</button>
@@ -6656,6 +6669,12 @@ function sum(arr, key) {
     return arr.reduce((s, d) => s + (parseFloat(d[key]) || 0), 0);
 }
 
+// 実効実施日: reschedule_date が設定されていればそちらを、なければ scheduled_date を使用
+// これにより各アポがちょうど1か月にのみ属し、二重計上を防ぐ
+function effectiveDate(a) {
+    return a.reschedule_date || a.scheduled_date || '';
+}
+
 // 翌月 ym（YYYY-MM 形式）
 function getNextYM(ym) {
     const [y, m] = ym.split('-').map(Number);
@@ -6710,7 +6729,7 @@ function computeMonthKpis(ym) {
 
     const perf = perfSrc.filter(d => !excluded.includes(d.member_name) && d.input_date && d.input_date.startsWith(ym) && inRange(d.input_date));
     const appo = appoSrc.filter(d => !excluded.includes(d.member_name) && d.acquisition_date && d.acquisition_date.startsWith(ym) && inRange(d.acquisition_date));
-    const execAppo = execSrc.filter(d => !excluded.includes(d.member_name) && d.scheduled_date && d.scheduled_date.startsWith(ym) && inRange(d.scheduled_date));
+    const execAppo = execSrc.filter(d => !excluded.includes(d.member_name) && effectiveDate(d).startsWith(ym) && inRange(effectiveDate(d)));
 
     const calls = sum(perf, 'call_count');
     const pr = sum(perf, 'pr_count');
