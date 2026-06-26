@@ -4121,15 +4121,29 @@ async function deleteAppointment(id) {
             const idx = list.findIndex(a => a.id === id);
             if (idx >= 0) list.splice(idx, 1);
         });
-        showToast('アポを削除しました');
+        showUndoToast('アポを削除しました', () => undoDeleteAppointment(id));
         renderAppointments();
-        // 経営タブ等も再描画して集計を反映
         if (typeof renderAll === 'function') {
             try { renderAll(); } catch (e) { /* noop */ }
         }
     } catch (error) {
         console.error('アポ削除に失敗:', error);
         alert('削除に失敗しました: ' + error.message);
+    }
+}
+
+async function undoDeleteAppointment(id) {
+    try {
+        await executeTurso(
+            "UPDATE appointments SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?",
+            [id]
+        );
+        await loadMonthData();
+        renderAll();
+        showToast('削除を取り消しました');
+    } catch (error) {
+        console.error('元に戻すに失敗:', error);
+        alert('元に戻すに失敗しました: ' + error.message);
     }
 }
 
@@ -5864,6 +5878,40 @@ function showToast(message, isError = false) {
         toast.classList.remove('show');
         setTimeout(() => toast.remove(), 400);
     }, 3000);
+}
+
+let _undoTimer = null;
+function showUndoToast(message, undoFn) {
+    const existing = document.querySelector('.toast-notification');
+    if (existing) existing.remove();
+    if (_undoTimer) { clearTimeout(_undoTimer); _undoTimer = null; }
+
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification';
+
+    const span = document.createElement('span');
+    span.textContent = '\u2714 ' + message;
+
+    const btn = document.createElement('button');
+    btn.className = 'toast-undo-btn';
+    btn.textContent = '\u5143\u306b\u623b\u3059';
+    btn.onclick = function() {
+        if (_undoTimer) { clearTimeout(_undoTimer); _undoTimer = null; }
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 400);
+        undoFn();
+    };
+
+    toast.appendChild(span);
+    toast.appendChild(btn);
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('show'));
+
+    _undoTimer = setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 400);
+        _undoTimer = null;
+    }, 5000);
 }
 
 function setSaveBtnState(btn, success) {
